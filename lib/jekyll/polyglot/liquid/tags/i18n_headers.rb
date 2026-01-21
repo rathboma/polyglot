@@ -39,10 +39,13 @@ module Jekyll
           end
 
           # Build a hash of lang => permalink for all matching docs
+          # Ensure we're using canonical case for hash keys
           # If lang is not set, assume it's the default language
           lang_to_permalink = docs_with_same_id.to_h do |doc|
-            doc_lang = doc.data['lang'] || site.default_lang
-            [doc_lang, doc.data['permalink']]
+            doc_lang = doc.data['lang']
+            # Defensive: ensure canonical case (should already be normalized by coordinate_documents)
+            canonical_lang = site.normalize_lang(doc_lang) || doc_lang || site.default_lang
+            [canonical_lang, doc.data['permalink']]
           end
 
 
