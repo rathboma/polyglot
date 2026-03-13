@@ -27,7 +27,9 @@ module Jekyll
       @languages = config.fetch('languages', ['en']).uniq
 
       # Create normalized lookup hash: lowercase -> original case
+      # Include default_lang so it's always recognized even if not in languages array
       @lang_norm_map = {}
+      @lang_norm_map[@default_lang.downcase] = @default_lang
       @languages.each { |lang| @lang_norm_map[lang.downcase] = lang }
 
       # Store normalized versions for fast lookup
@@ -178,16 +180,18 @@ module Jekyll
         doc_lang_raw = doc.data['lang'] || derive_lang_from_path(doc)
         lang = normalize_lang(doc_lang_raw) || @default_lang
 
+        # FILTER: Skip documents whose explicit lang is not in configured languages.
+        # Check the raw value so that documents with an unconfigured lang like 'de'
+        # are excluded even though normalize_lang maps them to nil -> default_lang.
+        if doc_lang_raw && !normalize_lang(doc_lang_raw)
+          Jekyll.logger.warn "Polyglot:", "Skipping #{doc.relative_path} - lang '#{doc_lang_raw}' not in configured languages #{valid_languages.inspect}"
+          next
+        end
+
         # Update the document's lang data to use canonical case
         # This ensures downstream code always works with consistent casing
         if doc_lang_raw && lang != doc_lang_raw
           doc.data['lang'] = lang
-        end
-
-        # FILTER: Skip documents with unconfigured languages
-        unless valid_languages.include?(lang)
-          Jekyll.logger.warn "Polyglot:", "Skipping #{doc.relative_path} - lang '#{lang}' not in configured languages #{valid_languages.inspect}"
-          next
         end
 
         lang_exclusive = doc.data['lang-exclusive'] || []
@@ -275,8 +279,9 @@ module Jekyll
           doclang_raw = dd.data['lang'] || derive_lang_from_path(dd)
           doclang = normalize_lang(doclang_raw) || @default_lang
 
-          # FILTER: Only include permalinks for configured languages
-          next unless valid_languages.include?(doclang)
+          # FILTER: Only include permalinks for configured languages.
+          # Check raw value so unconfigured languages are excluded.
+          next if doclang_raw && !normalize_lang(doclang_raw)
 
           doc.data['permalink_lang'][doclang] = dd.data['permalink']
         end

@@ -40,13 +40,16 @@ module Jekyll
 
           # Build a hash of lang => permalink for all matching docs
           # Ensure we're using canonical case for hash keys
+          # Filter by explicit lang to exclude unconfigured languages even after normalization
           # If lang is not set, assume it's the default language
-          lang_to_permalink = docs_with_same_id.to_h do |doc|
-            doc_lang = doc.data['lang']
-            # Defensive: ensure canonical case (should already be normalized by coordinate_documents)
-            canonical_lang = site.normalize_lang(doc_lang) || doc_lang || site.default_lang
-            [canonical_lang, doc.data['permalink']]
-          end
+          valid_languages = ([site.default_lang] + site.languages).uniq
+          lang_to_permalink = docs_with_same_id
+            .reject { |doc| doc.data['lang'] && !valid_languages.include?(site.normalize_lang(doc.data['lang']) || doc.data['lang']) }
+            .to_h do |doc|
+              doc_lang = doc.data['lang']
+              canonical_lang = site.normalize_lang(doc_lang) || doc_lang || site.default_lang
+              [canonical_lang, doc.data['permalink']]
+            end
 
 
           # Determine if this page has an actual translation for the active language
