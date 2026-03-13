@@ -517,12 +517,97 @@ describe Site do
         @site.assignPageRedirects(docs[1], docs)
         expect(docs[1].data['redirect_from']).to include('/a-really-long/permalink/')
       end
+
+      # Tests for user-defined redirect_from handling
+      it 'preserves user-defined redirect_from when page_id is not set' do
+        doc = Jekyll::Document.new('test.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['permalink'] = '/new-url/'
+          d.data['redirect_from'] = ['/old-url/']
+        end
+
+        @site.assignPageRedirects(doc, [doc])
+
+        expect(doc.data['redirect_from']).to eq(['/old-url/'])
+      end
+
+      it 'handles string redirect_from value' do
+        doc = Jekyll::Document.new('test.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'de'
+          d.data['permalink'] = '/de/new-url/'
+          d.data['redirect_from'] = '/old-url/' # String, not array
+        end
+
+        @site.assignPageRedirects(doc, [doc])
+
+        expect(doc.data['redirect_from']).to be_a(Array)
+      end
+
+      it 'should preserve user-defined redirect_from when page_id is set' do
+        doc = Jekyll::Document.new('test.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['page_id'] = 'test-page'
+          d.data['permalink'] = '/new-url/'
+          d.data['redirect_from'] = ['/old-url/', '/legacy/']
+        end
+
+        other_doc = Jekyll::Document.new('test.de.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'de'
+          d.data['page_id'] = 'test-page'
+          d.data['permalink'] = '/de/neue-url/'
+        end
+
+        @site.assignPageRedirects(doc, [doc, other_doc])
+
+        expect(doc.data['redirect_from']).to include('/old-url/')
+        expect(doc.data['redirect_from']).to include('/legacy/')
+        expect(doc.data['redirect_from']).to include('/de/neue-url/')
+      end
+
+      it 'should scope user-defined redirect_from to document language for non-default languages' do
+        doc = Jekyll::Document.new('test.de.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'de'
+          d.data['permalink'] = '/de/neue-url/'
+          d.data['redirect_from'] = ['/alte-url/', '/legacy/']
+        end
+
+        @site.assignPageRedirects(doc, [doc])
+
+        expect(doc.data['redirect_from']).to include('/de/alte-url/')
+        expect(doc.data['redirect_from']).to include('/de/legacy/')
+        expect(doc.data['redirect_from']).not_to include('/alte-url/')
+      end
+
+      it 'should not prefix redirect_from for default language' do
+        doc = Jekyll::Document.new('test.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['permalink'] = '/new-url/'
+          d.data['redirect_from'] = ['/old-url/']
+        end
+
+        @site.assignPageRedirects(doc, [doc])
+
+        expect(doc.data['redirect_from']).to eq(['/old-url/'])
+      end
+
+      it 'should not double-prefix redirects that already have language prefix' do
+        doc = Jekyll::Document.new('test.de.md', site: @site, collection: @collection).tap do |d|
+          d.data['lang'] = 'de'
+          d.data['permalink'] = '/de/neue-url/'
+          d.data['redirect_from'] = ['/de/alte-url/', '/legacy/']
+        end
+
+        @site.assignPageRedirects(doc, [doc])
+
+        expect(doc.data['redirect_from']).to include('/de/alte-url/')
+        expect(doc.data['redirect_from']).to include('/de/legacy/')
+        expect(doc.data['redirect_from']).not_to include('/de/de/alte-url/')
+      end
     end
 
     it 'parses static_href block and outputs correct HTML' do
       @site.active_lang = 'en'
       template = <<~LIQUID
-        <meta http-equiv="Content-Language" content="{{ site.active_lang }}">
         <link rel="alternate" hreflang="x-default" {% static_href %}href="https://test.github.io/"{% endstatic_href %} />
         <link rel="alternate" hreflang="en" {% static_href %}href="https://test.github.io/"{% endstatic_href %} />
         <link rel="alternate" hreflang="de" {% static_href %}href="https://test.github.io/de"{% endstatic_href %} />
@@ -530,7 +615,6 @@ describe Site do
         <link rel="alternate" hreflang="pt-BR" {% static_href %}href="https://test.github.io/pt-BR"{% endstatic_href %} />
       LIQUID
       expected = <<~HTML
-        <meta http-equiv="Content-Language" content="en">
         <link rel="alternate" hreflang="x-default" href="https://test.github.io/" />
         <link rel="alternate" hreflang="en" href="https://test.github.io/" />
         <link rel="alternate" hreflang="de" href="https://test.github.io/de" />
@@ -1394,6 +1478,131 @@ describe Site do
       if canonical_lang_in_path
         expect(canonical_lang_in_path[1]).to eq('pt-BR'),
           "URL should use config case 'pt-BR' not '#{canonical_lang_in_path[1]}'"
+      end
+    end
+
+    describe 'coordinate_documents with unconfigured languages' do
+      before do
+        @collection = Jekyll::Collection.new(@site, 'test')
+      end
+
+      it 'should exclude documents with unconfigured lang in frontmatter' do
+        # Configure site with only en and es
+        @site.config['languages'] = ['en', 'es']
+        @site.config['default_lang'] = 'en'
+        @site.prepare
+
+        docs = [
+          # lang: en - should be included
+          Jekyll::Document.new('test-en.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'en'
+            doc.data['title'] = 'English Page'
+          end,
+          # lang: de - should be excluded (not in config)
+          Jekyll::Document.new('test-de.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'de'
+            doc.data['title'] = 'German Page'
+          end,
+          # lang: es - should be included
+          Jekyll::Document.new('test-es.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'es'
+            doc.data['title'] = 'Spanish Page'
+          end
+        ]
+
+        coordinated = @site.coordinate_documents(docs)
+        coordinated_langs = coordinated.map { |d| d.data['lang'] }
+
+        expect(coordinated_langs).to include('en')
+        expect(coordinated_langs).to include('es')
+        expect(coordinated_langs).not_to include('de')
+      end
+
+      it 'should include documents with default_lang even if not in languages array' do
+        # Configure with es and fr, but default_lang is en
+        @site.config['languages'] = ['es', 'fr']
+        @site.config['default_lang'] = 'en'
+        @site.prepare
+
+        docs = [
+          # lang: en (default_lang) - should be included
+          Jekyll::Document.new('test-en.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'en'
+            doc.data['title'] = 'English Page'
+          end,
+          # lang: es - should be included
+          Jekyll::Document.new('test-es.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'es'
+            doc.data['title'] = 'Spanish Page'
+          end,
+          # lang: de - should be excluded
+          Jekyll::Document.new('test-de.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'de'
+            doc.data['title'] = 'German Page'
+          end
+        ]
+
+        coordinated = @site.coordinate_documents(docs)
+        coordinated_langs = coordinated.map { |d| d.data['lang'] }
+
+        expect(coordinated_langs).to include('en')  # default_lang always included
+        expect(coordinated_langs).to include('es')
+        expect(coordinated_langs).not_to include('de')
+      end
+
+      it 'should normalize unconfigured language to default_lang' do
+        # With normalize_lang, unknown languages normalize to nil and fall back to default_lang
+        @site.config['languages'] = ['en', 'es']
+        @site.config['default_lang'] = 'en'
+        @site.prepare
+
+        doc = Jekyll::Document.new('test-de.md', site: @site, collection: @collection)
+        doc.data['lang'] = 'de'
+        doc.data['title'] = 'German Page'
+
+        coordinated = @site.coordinate_documents([doc])
+        # 'de' is not in config, so normalize_lang returns nil, falling back to default_lang 'en'
+        expect(coordinated.length).to eq(1)
+        expect(coordinated[0].data['rendered_lang']).to eq('en')
+      end
+    end
+
+    describe 'assignPageLanguagePermalinks with unconfigured languages' do
+      before do
+        @collection = Jekyll::Collection.new(@site, 'test')
+      end
+
+      it 'should only include configured languages in permalink_lang' do
+        @site.config['languages'] = ['en', 'es']
+        @site.config['default_lang'] = 'en'
+        @site.prepare
+
+        # Create docs with en, es, de (de not configured)
+        docs = [
+          Jekyll::Document.new('test-en.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'en'
+            doc.data['page_id'] = 'test-page'
+            doc.data['permalink'] = '/test/'
+          end,
+          Jekyll::Document.new('test-es.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'es'
+            doc.data['page_id'] = 'test-page'
+            doc.data['permalink'] = '/es/test/'
+          end,
+          Jekyll::Document.new('test-de.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'de'
+            doc.data['page_id'] = 'test-page'
+            doc.data['permalink'] = '/de/test/'
+          end
+        ]
+
+        # Call assignPageLanguagePermalinks on the English doc
+        @site.assignPageLanguagePermalinks(docs[0], docs)
+
+        # Verify permalink_lang only has keys for en and es
+        expect(docs[0].data['permalink_lang'].keys).to include('en')
+        expect(docs[0].data['permalink_lang'].keys).to include('es')
+        expect(docs[0].data['permalink_lang'].keys).not_to include('de')
       end
     end
   end

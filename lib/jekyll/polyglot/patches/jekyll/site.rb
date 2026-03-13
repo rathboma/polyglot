@@ -170,6 +170,9 @@ module Jekyll
     def coordinate_documents(docs)
       regex = document_url_regex
       approved = {}
+      # Build set of valid languages (default + configured)
+      valid_languages = ([@default_lang] + @languages).uniq
+
       docs.each do |doc|
         # Normalize language codes for comparison
         doc_lang_raw = doc.data['lang'] || derive_lang_from_path(doc)
@@ -179,6 +182,12 @@ module Jekyll
         # This ensures downstream code always works with consistent casing
         if doc_lang_raw && lang != doc_lang_raw
           doc.data['lang'] = lang
+        end
+
+        # FILTER: Skip documents with unconfigured languages
+        unless valid_languages.include?(lang)
+          Jekyll.logger.warn "Polyglot:", "Skipping #{doc.relative_path} - lang '#{lang}' not in configured languages #{valid_languages.inspect}"
+          next
         end
 
         lang_exclusive = doc.data['lang-exclusive'] || []
@@ -212,28 +221,52 @@ module Jekyll
     end
 
     def assignPageRedirects(doc, docs)
-      pageId = doc.data['page_id']
-      if !pageId.nil? && !pageId.empty?
-        redirects = []
+      # Preserve and normalize user-defined redirect_from
+      user_redirects = doc.data['redirect_from'] || []
+      user_redirects = [user_redirects] unless user_redirects.is_a?(Array)
 
-        docs_with_same_id = docs.select { |dd| dd.data['page_id'] == pageId }
+      # Determine document language
+      doc_lang = doc.data['lang'] || derive_lang_from_path(doc) || @default_lang
 
-        # For each document with the same page_id
-        docs_with_same_id.each do |dd|
-          # Add redirect if it's a different permalink
-          if dd.data['permalink'] != doc.data['permalink']
-            redirects << dd.data['permalink']
+      # Scope user-defined redirects to document's language if non-default
+      if doc_lang != @default_lang && !user_redirects.empty?
+        user_redirects = user_redirects.map do |redirect_path|
+          # Normalize path to start with /
+          redirect_path = "/#{redirect_path}" unless redirect_path.start_with?('/')
+          # Only prefix if not already prefixed with this language
+          if redirect_path.start_with?("/#{doc_lang}/")
+            redirect_path
+          else
+            "/#{doc_lang}#{redirect_path}"
           end
         end
-
-        doc.data['redirect_from'] = redirects
       end
+
+      # Compute page_id based redirects (cross-language)
+      computed_redirects = []
+      pageId = doc.data['page_id']
+      if !pageId.nil? && !pageId.empty?
+        docs_with_same_id = docs.select { |dd| dd.data['page_id'] == pageId }
+        docs_with_same_id.each do |dd|
+          if dd.data['permalink'] != doc.data['permalink']
+            computed_redirects << dd.data['permalink']
+          end
+        end
+      end
+
+      # Merge user-defined and computed redirects, removing duplicates
+      all_redirects = (user_redirects + computed_redirects).uniq
+      doc.data['redirect_from'] = all_redirects unless all_redirects.empty?
     end
 
     def assignPageLanguagePermalinks(doc, docs)
       pageId = doc.data['page_id']
       if !pageId.nil? && !pageId.empty?
         unless doc.data['permalink_lang'] then doc.data['permalink_lang'] = {} end
+
+        # Build set of valid languages
+        valid_languages = ([@default_lang] + @languages).uniq
+
         permalinkDocs = docs.select do |dd|
           dd.data['page_id'] == pageId
         end
@@ -241,6 +274,10 @@ module Jekyll
           # Normalize the language code
           doclang_raw = dd.data['lang'] || derive_lang_from_path(dd)
           doclang = normalize_lang(doclang_raw) || @default_lang
+
+          # FILTER: Only include permalinks for configured languages
+          next unless valid_languages.include?(doclang)
+
           doc.data['permalink_lang'][doclang] = dd.data['permalink']
         end
       end
