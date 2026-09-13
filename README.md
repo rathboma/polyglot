@@ -101,10 +101,15 @@ This is useful in order to generate language menus and even localization meta in
 Sample code for meta link generation:
 ```
 {% for lang in site.languages %}
-  {% capture lang_href %}{{site.baseurl}}/{% if lang != site.default_lang %}{{ lang }}/{% endif %}{% if page.permalink_lang[lang] != '/' %}{{page.permalink_lang[lang]}}{% endif %}{% endcapture %}
+  {% capture lang_href %}{{site.baseurl}}/{% if lang != site.default_lang %}{{ lang | lang_slug }}/{% endif %}{% if page.permalink_lang[lang] != '/' %}{{page.permalink_lang[lang]}}{% endif %}{% endcapture %}
   <link rel="alternate" hreflang="{{ lang }}" {% static_href %}href="{{ lang_href }}"{% endstatic_href %} />
 {% endfor %}
 ```
+
+Note the two different values: `hreflang` gets the language **code**, while the URL gets
+`{{ lang | lang_slug }}` — the language's path **slug**. They're the same string unless you
+configure [`language_slugs`](#separating-language-code-from-url-slug-language_slugs), and the
+filter is a no-op when you haven't.
 
 
 #### Using different permalinks per language
@@ -313,9 +318,28 @@ language_slugs:
 
 With this configured:
 - Output is written to `_site/pt-br/...` instead of `_site/pt-BR/...`
-- Relativized links, `hreflang` hrefs and `canonical_url` all use `/pt-br/...`
+- Relativized links, `hreflang` hrefs, `canonical_url` and the rules `localize_redirects` generates all use `/pt-br/...`
 - `hreflang="pt-BR"` and `<html lang="pt-BR">` (via `site.active_lang`) are unaffected - the slug only changes the path segment, not the language code used for `_data/` lookups, `hreflang`, or `lang`
 - A language absent from `language_slugs` behaves exactly as before (its own code is used as the slug)
+
+#### Your templates need the `lang_slug` filter
+
+**This is the one thing that will bite you.** `language_slugs` governs the URLs *Polyglot*
+builds. Any template of yours that builds a language URL by iterating `site.languages` keeps
+emitting the raw code, and nothing warns you — the pages build fine and every link is a 301.
+The two that catch people are the language switcher and a hand-rolled `sitemap.xml`.
+
+Pipe the language through the `lang_slug` filter wherever it becomes a **path**:
+
+```liquid
+{% for lang in site.languages %}
+  <a href="{{ site.baseurl }}/{{ lang | lang_slug }}/about" hreflang="{{ lang }}">{{ lang }}</a>
+{% endfor %}
+```
+
+Keep using the bare code for `hreflang`, `<html lang>` and `site.data[lang]` lookups - the
+filter is only for the path segment. It returns the code unchanged for any language you
+haven't given a slug, so it is safe to adopt everywhere before you need it.
 
 *Alternative that needs no gem update:* rename your `_data/pt-BR/` directory to `_data/pt-br/` and list `"pt-br"` in `languages` instead of `"pt-BR"`. `normalize_lang` is case-insensitive, so existing `lang: pt-BR` front matter keeps matching. Pick whichever approach suits you - `language_slugs` if you want to keep authoring content with the correct BCP 47 tag, the rename if you'd rather not touch your config.
 

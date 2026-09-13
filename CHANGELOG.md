@@ -25,3 +25,7 @@ All notable changes to jekyll-polyglot are documented here.
   casing doesn't survive being served as a path (hosts that lower-case paths, e.g. `pt-BR`
   -> `pt-br`) previously 301ing every emitted URL for that language. See README ("Separating
   Language Code from URL Slug").
+- `lang_slug` Liquid filter, so templates that build their own language URLs (a language
+  switcher, a hand-written `sitemap.xml`) emit the slug rather than the raw language code:
+  `{{ lang | lang_slug }}`. Returns the code unchanged when no slug is configured, so it is
+  safe to use unconditionally.
