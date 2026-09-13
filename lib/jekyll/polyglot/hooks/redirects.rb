@@ -20,6 +20,17 @@ Jekyll::Hooks.register :polyglot, :post_write do |site|
   hook_redirects(site)
 end
 
+# True when a redirect source already sits under one of the site's languages.
+# Checks both the slug (what the path actually is) and the language code, since
+# a hand-written rule may use either when language_slugs maps them apart.
+def already_language_prefixed?(site, source)
+  site.languages.any? do |lang|
+    ["/#{site.lang_slug(lang)}", "/#{lang}"].uniq.any? do |prefix|
+      source.start_with?("#{prefix}/") || source == prefix
+    end
+  end
+end
+
 def hook_redirects(site)
   return unless site.config.fetch('localize_redirects', false)
 
@@ -51,19 +62,22 @@ def hook_redirects(site)
     next unless source.start_with?('/')
 
     # Skip if source already has a language prefix
-    next if site.languages.any? { |lang| source.start_with?("/#{lang}/") || source == "/#{lang}" }
+    next if already_language_prefixed?(site, source)
 
     # Add localized versions for non-default languages
     site.languages.each do |lang|
       next if lang == site.default_lang
 
-      localized_source = "/#{lang}#{source}"
+      # Paths use the slug, not the language code - a rule written with the
+      # code would point at a URL the host redirects away from.
+      slug = site.lang_slug(lang)
+      localized_source = "/#{slug}#{source}"
       destination = parts[1]
 
       # Localize destination if it's an internal path (starts with /)
       # but not if it's an external URL (contains ://)
       localized_destination = if destination.start_with?('/') && !destination.include?('://')
-                                "/#{lang}#{destination}"
+                                "/#{slug}#{destination}"
                               else
                                 destination
                               end

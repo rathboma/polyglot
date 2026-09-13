@@ -121,6 +121,70 @@ describe 'hook_redirects' do
     end
   end
 
+  describe 'language_slugs' do
+    def create_slug_site(config_overrides = {})
+      create_site({
+        'languages' => ['en', 'es', 'pt-BR'],
+        'language_slugs' => { 'pt-BR' => 'pt-br' },
+        'localize_redirects' => true
+      }.merge(config_overrides))
+    end
+
+    it 'should localize using the slug, not the language code' do
+      write_redirects("/github https://github.com/org/repo 302\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      hook_redirects(create_slug_site)
+
+      output = read_output_redirects
+      expect(output).to include("/pt-br/github https://github.com/org/repo 302")
+      expect(output).not_to include("/pt-BR/")
+    end
+
+    it 'should localize internal destinations using the slug' do
+      write_redirects("/legal/policies/* /security 301\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      hook_redirects(create_slug_site)
+
+      output = read_output_redirects
+      expect(output).to include("/pt-br/legal/policies/* /pt-br/security 301")
+      expect(output).not_to include("/pt-BR/")
+    end
+
+    it 'should not re-localize a catch-all rule already written with the slug' do
+      write_redirects("/pt-br/* /:splat 301\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      hook_redirects(create_slug_site)
+
+      output = read_output_redirects
+      # Exactly the source rule, untouched - no /pt-BR/pt-br/* or /es/pt-br/* garbage
+      expect(output.strip).to eq("/pt-br/* /:splat 301")
+    end
+
+    it 'should not re-localize a rule written with the language code' do
+      write_redirects("/pt-BR/old-page /pt-BR/new-page 301\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      hook_redirects(create_slug_site)
+
+      output = read_output_redirects
+      expect(output.strip).to eq("/pt-BR/old-page /pt-BR/new-page 301")
+    end
+
+    it 'should be unchanged for languages absent from language_slugs' do
+      write_redirects("/github https://github.com/org/repo 302\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      hook_redirects(create_slug_site)
+
+      output = read_output_redirects
+      expect(output).to include("/es/github https://github.com/org/repo 302")
+      expect(output).not_to include("/en/github")
+    end
+  end
+
   describe 'exclude_from_redirect_localization' do
     it 'should not localize excluded paths' do
       write_redirects("/github https://github.com/org/repo 302\n/signin https://app.example.com/signin 302\n")
