@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang, :generate_fallback_pages
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -20,6 +20,10 @@ module Jekyll
       @serial_default_lang = config.fetch('serial_default_lang', false)
       @lang_from_path = config.fetch('lang_from_path', false)
       @fallback_canonical_to_default_lang = config.fetch('fallback_canonical_to_default_lang', false)
+      # When false, a language pass only approves documents whose own lang
+      # matches that pass - no default-language body is generated under a
+      # localised URL for translations that don't exist. See README.
+      @generate_fallback_pages = config.fetch('generate_fallback_pages', true)
       @exclude_from_localization = config.fetch('exclude_from_localization', []).map do |e|
         if File.directory?(e) && e[-1] != '/'
           "#{e}/"
@@ -223,6 +227,8 @@ module Jekyll
 
         # skip entirely if nothing to check
         next if @file_langs.nil?
+        # skip this document if fallback pages are disabled and it isn't in the active language
+        next if !@generate_fallback_pages && lang != @active_lang
         # skip this document if it has already been processed
         next if @file_langs[page_id] == @active_lang
         # skip this document if it has a fallback and it isn't assigned to the active language

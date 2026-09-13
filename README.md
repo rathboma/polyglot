@@ -146,6 +146,25 @@ Lets say you are building your website. You have an `/about/` page written in *e
 
 No worries. Polyglot ensures the sitemap of your *english* site matches your *french* site, matches your *swedish* and *german* sites too. In this case, because you specified a `default_lang` variable in your `_config.yml`, all sites missing their languages' counterparts will fallback to your `default_lang`, so content is preserved across different languages of your site.
 
+#### Disabling Fallback Pages (`generate_fallback_pages`)
+_Unreleased_
+
+By default (`generate_fallback_pages: true`), Polyglot generates the behavior described above: a page missing a *french* translation still gets a `/fr/about/` URL, serving the *english* body under it with a self-referencing canonical.
+
+A localised URL is arguably only useful when a real translation exists for it — a URL for content that's identical to the default language just gives search engines a near-duplicate page to crawl. Set:
+
+```yaml
+generate_fallback_pages: false
+```
+
+and a language pass only approves documents whose own `lang` (or `lang_from_path`-derived language) matches that pass. If there's no *french* version of `/about/`, no `/fr/about/` page is generated at all — not even a copy of the *english* content. This is symmetric: a page that only exists in *french* is likewise excluded from every other language's pass.
+
+With this option enabled, be aware of two things:
+- **Host catch-all.** Untranslated `/fr/...` URLs now 404 unless your host redirects them back to the un-prefixed URL. On Netlify, add one rule per language: `/fr/* /:splat 301`. Netlify serves a real file before consulting non-forced redirects, so pages that *do* have a *french* translation keep working — verify this on a deploy preview before relying on it, and check that `localize_redirects: true` (see below) doesn't rewrite these catch-all rules.
+- **Language switcher.** Only link to languages that actually exist for the current page (see `page.permalink_lang` and `page.rendered_lang`) — linking every configured language on every page means a visitor can click "Deutsch" and land back on the English version of a page that has no German translation.
+
+**Trade-off:** visitors who previously read default-language content under a localised URL lose that URL's localised navigation chrome (menus, language switcher state, etc. that were rendered for that language pass). This is the correct trade-off for SEO, but it's worth knowing about before you flip the flag on an existing site.
+
 #### Smart hreflang Generation
 
 Polyglot only generates `hreflang` tags for languages that have actual translations. This improves SEO correctness by not advertising language alternatives that don't actually exist.

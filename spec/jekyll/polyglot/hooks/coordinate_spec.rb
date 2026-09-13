@@ -74,19 +74,21 @@ Dir.mktmpdir do |_|
       it 'test fixtures in the default lang' do
         expect(@site.source).to end_with('spec/fixture')
         @site.process_language 'en'
-        expect(@site.pages).to have_attributes(size: 3) # 2 pages + sitemap.xml
+        expect(@site.pages).to have_attributes(size: 4) # 3 pages + sitemap.xml
+        expect(@site.pages.map(&:name)).to include('en.contact.md')
       end
 
       it 'should include files in the default_lang without active_lang' do
         @site.process_language 'fr'
-        expect(@site.pages).to have_attributes(size: 4) # 3 pages + sitemap.xml
+        expect(@site.pages).to have_attributes(size: 5) # 4 pages + sitemap.xml
         expect(@site.pages.map(&:name)).to include('en.about.md')
       end
 
       it 'should include files in the active_lang' do
         @site.process_language 'fr'
-        expect(@site.pages).to have_attributes(size: 4) # 3 pages + sitemap.xml
-        expect(@site.pages.map(&:name)).to include('fr.menu.md', 'fr.members.md')
+        expect(@site.pages).to have_attributes(size: 5) # 4 pages + sitemap.xml
+        expect(@site.pages.map(&:name)).to include('fr.menu.md', 'fr.members.md', 'fr.contact.md')
+        expect(@site.pages.map(&:name)).not_to include('en.contact.md')
       end
 
       it 'should not include files in the default_lang with the active_lang' do
@@ -109,12 +111,14 @@ Dir.mktmpdir do |_|
         @site.process_language 'en'
         expect(@site.pages.select { |doc| doc.name == 'en.about.md' }.first.permalink).to eq('about')
         expect(@site.pages.select { |doc| doc.name == 'en.menu.md' }.first.permalink).to eq('the-menu')
+        expect(@site.pages.select { |doc| doc.name == 'en.contact.md' }.first.permalink).to eq('/contact')
         @site.process_language 'es'
         expect(@site.pages.select { |doc| doc.name == 'es.menu.md' }.first.permalink).to eq('el-menu')
         expect(@site.pages.select { |doc| doc.name == 'es.samba.md' }.first.permalink).to eq('samba')
         @site.process_language 'fr'
         expect(@site.pages.select { |doc| doc.name == 'fr.menu.md' }.first.permalink).to eq('le-menu')
         expect(@site.pages.select { |doc| doc.name == 'fr.members.md' }.first.permalink).to eq('members')
+        expect(@site.pages.select { |doc| doc.name == 'fr.contact.md' }.first.permalink).to eq('/nous-contacter')
       end
 
       it 'should contain permalink_lang when page_id is specified' do
@@ -125,6 +129,80 @@ Dir.mktmpdir do |_|
         expect(menu_permalink_lang['en']).to eq('the-menu')
         expect(menu_permalink_lang['es']).to eq('el-menu')
         expect(menu_permalink_lang['fr']).to eq('le-menu')
+      end
+    end
+
+    def build_site(overrides = {})
+      site = Site.new(
+        Jekyll.configuration(
+          {
+            'languages' => @langs,
+            'default_lang' => @default_lang,
+            'exclude_from_localization' => @exclude_from_localization,
+            'source' => File.expand_path('../../../../fixture', __FILE__)
+          }.merge(overrides)
+        )
+      )
+      site.prepare
+      site
+    end
+
+    describe 'generate_fallback_pages option' do
+      it 'defaults to true: fr pass still approves the en-only about page as a fallback' do
+        site = build_site
+        site.process_language 'fr'
+        expect(site.pages.map(&:name)).to include('en.about.md')
+      end
+
+      it 'explicit true: fr pass still approves the en-only about page as a fallback' do
+        site = build_site('generate_fallback_pages' => true)
+        site.process_language 'fr'
+        expect(site.pages.map(&:name)).to include('en.about.md')
+      end
+
+      it 'false: fr pass approves menu, members and contact, but not the en-only about page' do
+        site = build_site('generate_fallback_pages' => false)
+        site.process_language 'fr'
+        names = site.pages.map(&:name)
+        expect(names).to include('fr.menu.md', 'fr.members.md', 'fr.contact.md')
+        expect(names).not_to include('en.about.md')
+      end
+
+      it 'false: en pass approves about, menu and contact, but not the fr-exclusive members page' do
+        site = build_site('generate_fallback_pages' => false)
+        site.process_language 'en'
+        names = site.pages.map(&:name)
+        expect(names).to include('en.about.md', 'en.menu.md', 'en.contact.md')
+        expect(names).not_to include('fr.members.md')
+      end
+
+      it 'false: a lang-exclusive document still only ever appears in its exclusive language' do
+        site = build_site('generate_fallback_pages' => false)
+        site.process_language 'fr'
+        expect(site.pages.map(&:name)).to include('fr.members.md')
+
+        site_en = build_site('generate_fallback_pages' => false)
+        site_en.process_language 'en'
+        expect(site_en.pages.map(&:name)).not_to include('fr.members.md')
+
+        site_es = build_site('generate_fallback_pages' => false)
+        site_es.process_language 'es'
+        expect(site_es.pages.map(&:name)).not_to include('fr.members.md')
+      end
+
+      it 'hreflang on en/about lists only en and x-default; on en/menu lists all three (unchanged)' do
+        site = build_site('url' => 'https://example.com')
+        site.process_language 'en'
+        about = site.pages.find { |doc| doc.name == 'en.about.md' }
+        menu = site.pages.find { |doc| doc.name == 'en.menu.md' }
+
+        about_context = Liquid::Context.new({}, {}, { site: site, page: about.data })
+        about_output = Liquid::Template.parse('{% i18n_headers %}').render(about_context)
+        expect(about_output.scan(/hreflang="([^"]+)"/).flatten).to contain_exactly('en', 'x-default')
+
+        menu_context = Liquid::Context.new({}, {}, { site: site, page: menu.data })
+        menu_output = Liquid::Template.parse('{% i18n_headers %}').render(menu_context)
+        expect(menu_output.scan(/hreflang="([^"]+)"/).flatten).to contain_exactly('en', 'x-default', 'es', 'fr')
       end
     end
   end
