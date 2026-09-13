@@ -298,6 +298,27 @@ Will automatically generate localized versions for all your configured languages
 
 Paths listed in `exclude_from_redirect_localization` will not be localized, which is useful for authentication endpoints or app URLs that should only exist at the root level.
 
+### Separating Language Code from URL Slug (`language_slugs`)
+_Unreleased_
+
+A language's `_data/` key, its `hreflang` value, its `<html lang>` attribute and its output path segment are normally all the same string - the `lang` code. That's fine for most codes, but some correct BCP 47 tags don't survive being used as a path: `pt-BR` is the right tag for Brazilian Portuguese, but hosts like Netlify and S3 serve paths lower-cased, so `/pt-BR/...` gets 301'd to `/pt-br/...` - meaning every URL Polyglot emits for that language (in `hreflang`, in relativized links, in `canonical_url`) points at a redirect instead of the final page.
+
+`language_slugs` lets you keep the correct language code everywhere except the URL path:
+
+```yaml
+languages: ["en", "pt-BR"]
+language_slugs:
+  pt-BR: pt-br
+```
+
+With this configured:
+- Output is written to `_site/pt-br/...` instead of `_site/pt-BR/...`
+- Relativized links, `hreflang` hrefs and `canonical_url` all use `/pt-br/...`
+- `hreflang="pt-BR"` and `<html lang="pt-BR">` (via `site.active_lang`) are unaffected - the slug only changes the path segment, not the language code used for `_data/` lookups, `hreflang`, or `lang`
+- A language absent from `language_slugs` behaves exactly as before (its own code is used as the slug)
+
+*Alternative that needs no gem update:* rename your `_data/pt-BR/` directory to `_data/pt-br/` and list `"pt-br"` in `languages` instead of `"pt-BR"`. `normalize_lang` is case-insensitive, so existing `lang: pt-BR` front matter keeps matching. Pick whichever approach suits you - `language_slugs` if you want to keep authoring content with the correct BCP 47 tag, the rename if you'd rather not touch your config.
+
 ### Disabling Url Relativizing
 _New in 1.4.0_
 If you dont want a href attribute to be relativized (such as for making [a language switcher](https://github.com/untra/polyglot/blob/main/site/_includes/sidebar.html#L40)), you can use the block tag:

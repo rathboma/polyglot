@@ -406,6 +406,110 @@ describe Site do
     end
   end
 
+  describe 'language_slugs option' do
+    def build_ptbr_site(overrides = {})
+      site = Site.new(
+        Jekyll.configuration(
+          {
+            'languages' => ['en', 'pt-BR'],
+            'default_lang' => 'en',
+            'source' => File.expand_path('fixtures', __dir__),
+            'url' => 'https://test.github.io',
+            'language_slugs' => { 'pt-BR' => 'pt-br' }
+          }.merge(overrides)
+        )
+      )
+      site.prepare
+      site
+    end
+
+    it 'maps a configured language to its slug, and leaves unmapped languages as their own code' do
+      site = build_ptbr_site
+      expect(site.lang_slug('pt-BR')).to eq('pt-br')
+      expect(site.lang_slug('en')).to eq('en')
+    end
+
+    it 'writes a mapped language to a lower-case slug directory, and keeps it in keep_files' do
+      Dir.mktmpdir do |dest|
+        site = build_ptbr_site(
+          'source' => File.expand_path('../../../../fixture', __dir__),
+          'destination' => dest,
+          'parallel_localization' => false
+        )
+        site.process
+        expect(Dir.exist?(File.join(dest, 'pt-br'))).to be true
+        expect(Dir.exist?(File.join(dest, 'pt-BR'))).to be false
+        expect(File.exist?(File.join(dest, 'about.html'))).to be true
+        expect(File.exist?(File.join(dest, 'pt-br', 'about.html'))).to be true
+        expect(site.keep_files).to include('pt-br')
+        expect(site.keep_files).to_not include('pt-BR')
+      end
+    end
+
+    it 'relativizes local hrefs using the slug, not the raw language code' do
+      site = build_ptbr_site
+      site.active_lang = 'pt-BR'
+      regex = site.relative_url_regex
+      collection = Jekyll::Collection.new(site, 'test')
+      document = Jekyll::Document.new('about.pt-BR.md', site: site, collection: collection)
+      document.output = 'href="/menu/"'
+      site.relativize_urls(document, regex)
+      expect(document.output).to eq('href="/pt-br/menu/"')
+    end
+
+    it 'does not re-relativize (double-prefix) a link already under the slug directory' do
+      site = build_ptbr_site
+      regex = site.relative_url_regex
+      expect(regex).to_not match 'href="/pt-br/about/"'
+    end
+
+    it 'keeps hreflang and canonical on the real language code while the href path uses the slug' do
+      site = build_ptbr_site
+      collection = Jekyll::Collection.new(site, 'test')
+      docs = [
+        Jekyll::Document.new('test.md', site: site, collection: collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['page_id'] = 'accessibility'
+          d.data['permalink'] = '/accessibility'
+        end,
+        Jekyll::Document.new('test.md', site: site, collection: collection).tap do |d|
+          d.data['lang'] = 'pt-BR'
+          d.data['page_id'] = 'accessibility'
+          d.data['permalink'] = '/pt-br/accessibility'
+        end
+      ]
+      site.collections['test'] = collection
+      collection.docs.concat(docs)
+
+      site.active_lang = 'pt-BR'
+      page = docs[1].data.merge('page_id' => 'accessibility')
+      context = Liquid::Context.new({}, {}, { site: site, page: page })
+      output = Liquid::Template.parse('{% i18n_headers %}').render(context)
+
+      expect(output).to include('hreflang="pt-BR" href="https://test.github.io/pt-br/accessibility"')
+      expect(output).to_not include('/pt-br/pt-br/accessibility')
+      expect(site.active_lang).to eq('pt-BR')
+    end
+
+    it 'is byte-identical to unmapped behaviour for a language absent from language_slugs' do
+      mapped_site = build_ptbr_site('languages' => ['en', 'fr'])
+      plain_site = Site.new(
+        Jekyll.configuration(
+          'languages' => ['en', 'fr'],
+          'default_lang' => 'en',
+          'source' => File.expand_path('fixtures', __dir__),
+          'url' => 'https://test.github.io'
+        )
+      )
+      plain_site.prepare
+
+      expect(mapped_site.lang_slug('fr')).to eq(plain_site.lang_slug('fr'))
+      expect(mapped_site.relative_url_regex.source).to eq(plain_site.relative_url_regex.source)
+      expect(mapped_site.absolute_url_regex('https://test.github.io').source)
+        .to eq(plain_site.absolute_url_regex('https://test.github.io').source)
+    end
+  end
+
   describe @site do
     it 'should spawn no more than Etc.nprocessors processes' do
       forks = 0

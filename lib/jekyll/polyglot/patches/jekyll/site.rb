@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang, :generate_fallback_pages
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang, :generate_fallback_pages, :language_slugs
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -36,6 +36,10 @@ module Jekyll
     def fetch_languages
       @default_lang = config.fetch('default_lang', 'en')
       @languages = config.fetch('languages', ['en']).uniq
+      # Maps a language code to the path segment/output directory used for
+      # it, e.g. { 'pt-BR' => 'pt-br' }. Languages not present here use
+      # their own code as the slug. See README (language_slugs).
+      @language_slugs = config.fetch('language_slugs', {})
 
       # Create normalized lookup hash: lowercase -> original case
       # Include default_lang so it's always recognized even if not in languages array
@@ -46,9 +50,17 @@ module Jekyll
       # Store normalized versions for fast lookup
       @languages_normalized = @languages.map(&:downcase)
 
-      @keep_files += (@languages - [@default_lang])
+      @keep_files += (@languages - [@default_lang]).map { |lang| lang_slug(lang) }.uniq
       @active_lang = @default_lang
       @lang_vars = config.fetch('lang_vars', [])
+    end
+
+    # Returns the output-path slug for a language code, e.g. 'pt-br' for
+    # 'pt-BR'. Falls back to the code itself when unmapped by
+    # `language_slugs`. The code itself is still used for `_data/` lookup,
+    # `hreflang` and `<html lang>` - only the path segment changes.
+    def lang_slug(lang_code)
+      @language_slugs[lang_code] || lang_code
     end
 
     # Normalizes a language code to its canonical form from config
@@ -146,7 +158,7 @@ module Jekyll
       old_dest = @dest
       old_exclude = @exclude
       @file_langs = {}
-      @dest = "#{@dest}/#{@active_lang}"
+      @dest = "#{@dest}/#{lang_slug(@active_lang)}"
       @exclude += @exclude_from_localization
       process_orig
       @dest = old_dest
@@ -228,7 +240,7 @@ module Jekyll
         # Publish the canonical URL as document data so jekyll-seo-tag (which
         # already reads page['canonical_url']) agrees with I18n_Headers on
         # both <link rel="canonical"> and og:url. ||= so front matter wins.
-        doc.data['canonical_url'] ||= canonical_base + (@active_lang == @default_lang ? url : "/#{@active_lang}#{url}")
+        doc.data['canonical_url'] ||= canonical_base + (@active_lang == @default_lang ? url : "/#{lang_slug(@active_lang)}#{url}")
 
         # skip entirely if nothing to check
         next if @file_langs.nil?
@@ -358,7 +370,7 @@ module Jekyll
           regex += "(?!#{escaped_x})"
         end
         @languages.each do |x|
-          escaped_x = Regexp.escape(x)
+          escaped_x = Regexp.escape(lang_slug(x))
           regex += "(?!#{escaped_x}/)"
         end
       end
@@ -378,7 +390,7 @@ module Jekyll
           regex += "(?!#{escaped_x})"
         end
         @languages.each do |x|
-          escaped_x = Regexp.escape(x)
+          escaped_x = Regexp.escape(lang_slug(x))
           regex += "(?!#{escaped_x}/)"
         end
       end
@@ -393,7 +405,7 @@ module Jekyll
       return if doc.output.nil?
 
       modified_output = doc.output.dup
-      modified_output.gsub!(regex, "href=\"#{@baseurl}/#{@active_lang}/\\1\"")
+      modified_output.gsub!(regex, "href=\"#{@baseurl}/#{lang_slug(@active_lang)}/\\1\"")
       doc.output = modified_output
     end
 
@@ -401,7 +413,7 @@ module Jekyll
       return if doc.output.nil?
 
       modified_output = doc.output.dup
-      modified_output.gsub!(regex, "href=\"#{url}#{@baseurl}/#{@active_lang}/\\1\"")
+      modified_output.gsub!(regex, "href=\"#{url}#{@baseurl}/#{lang_slug(@active_lang)}/\\1\"")
       doc.output = modified_output
     end
 

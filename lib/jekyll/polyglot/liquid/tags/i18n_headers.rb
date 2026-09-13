@@ -74,7 +74,8 @@ module Jekyll
             current_permalink
           else
             # Don't add language prefix if it's already in the permalink
-            current_permalink.start_with?("/#{current_lang}/") ? current_permalink : "/#{current_lang}#{current_permalink}"
+            current_lang_slug = site.lang_slug(current_lang)
+            current_permalink.start_with?("/#{current_lang_slug}/") ? current_permalink : "/#{current_lang_slug}#{current_permalink}"
           end
           i18n += "<link rel=\"canonical\" href=\"#{site_url}#{canonical_permalink}\"/>\n"
 
@@ -97,7 +98,8 @@ module Jekyll
             else
               # For non-default languages, use the language-specific permalink directly
               # Don't add the language prefix if it's already in the permalink
-              lang_permalink = alt_permalink.start_with?("/#{lang}/") ? alt_permalink : "/#{lang}#{alt_permalink}"
+              lang_slug = site.lang_slug(lang)
+              lang_permalink = alt_permalink.start_with?("/#{lang_slug}/") ? alt_permalink : "/#{lang_slug}#{alt_permalink}"
               "<link rel=\"alternate\" hreflang=\"#{lang}\" href=\"#{site_url}#{lang_permalink}\"/>\n"
             end
           end
