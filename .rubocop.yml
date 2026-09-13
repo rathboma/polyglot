@@ -104,6 +104,10 @@ Metrics/AbcSize:
 
 Metrics/ClassLength:
   Max: 300
+  # Patched Jekyll classes mirror the structure of the class they reopen;
+  # splitting them up would obscure what is being overridden.
+  Exclude:
+    - 'lib/jekyll/polyglot/patches/**/*'
 
 Metrics/ModuleLength:
   Max: 200

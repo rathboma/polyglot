@@ -4,6 +4,13 @@ Jekyll::Hooks.register :site, :post_read do |site|
   hook_coordinate(site)
 end
 
+# Generators run after :site, :post_read, so pages they create never passed
+# through coordinate_documents. Give them the same language metadata before
+# anything renders.
+Jekyll::Hooks.register :site, :pre_render do |site, _payload|
+  site.coordinate_generated_documents
+end
+
 def hook_coordinate(site)
   # Copy the language specific data, by recursively merging it with the default data.
   # Favour active_lang first, then default_lang, then any non-language-specific data.

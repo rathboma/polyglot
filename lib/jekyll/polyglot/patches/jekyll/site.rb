@@ -197,6 +197,30 @@ module Jekyll
       nil
     end
 
+    # Builds the absolute canonical URL for a document url in the active
+    # language pass. The default language is unprefixed; other languages are
+    # prefixed with their slug, unless the url already carries it.
+    def canonical_url_for(url)
+      prefix = @active_lang == @default_lang ? '' : "/#{lang_slug(@active_lang)}"
+      prefix = '' if !prefix.empty? && url.start_with?("#{prefix}/")
+      "#{config['url']}#{@baseurl}#{prefix}#{url}"
+    end
+
+    # Assigns language metadata to documents coordinate_documents never saw.
+    # Jekyll runs generators after the :site, :post_read hook, so pages a
+    # generator creates (jekyll-archives category pages, for example) would
+    # otherwise reach render with neither rendered_lang nor canonical_url,
+    # leaving consumers like jekyll-seo-tag to emit an unprefixed og:url.
+    def coordinate_generated_documents
+      (collections.values.flat_map(&:docs) + pages).each do |doc|
+        next unless doc.respond_to?(:data) && doc.data.is_a?(Hash)
+
+        # A generated page belongs to the language pass that generated it.
+        doc.data['rendered_lang'] ||= normalize_lang(doc.data['lang']) || @active_lang
+        doc.data['canonical_url'] ||= canonical_url_for(doc.url)
+      end
+    end
+
     # assigns natural permalinks to documents and prioritizes documents with
     # active_lang languages over others.  If lang is not set in front matter,
     # then this tries to derive from the path, if the lang_from_path is set.
@@ -206,7 +230,6 @@ module Jekyll
       approved = {}
       # Build set of valid languages (default + configured)
       valid_languages = ([@default_lang] + @languages).uniq
-      canonical_base = "#{config['url']}#{@baseurl}"
 
       docs.each do |doc|
         # Normalize language codes for comparison
@@ -240,7 +263,7 @@ module Jekyll
         # Publish the canonical URL as document data so jekyll-seo-tag (which
         # already reads page['canonical_url']) agrees with I18n_Headers on
         # both <link rel="canonical"> and og:url. ||= so front matter wins.
-        doc.data['canonical_url'] ||= canonical_base + (@active_lang == @default_lang ? url : "/#{lang_slug(@active_lang)}#{url}")
+        doc.data['canonical_url'] ||= canonical_url_for(url)
 
         # skip entirely if nothing to check
         next if @file_langs.nil?
