@@ -305,6 +305,10 @@ Will automatically generate localized versions for all your configured languages
 
 Paths listed in `exclude_from_redirect_localization` will not be localized, which is useful for authentication endpoints or app URLs that should only exist at the root level.
 
+Rules are generated using each language's [slug](#separating-language-code-from-url-slug-language_slugs), and a rule whose source already sits under a language prefix is left alone rather than being localized again.
+
+**You may not need this with `generate_fallback_pages: false`.** The rules it generates mostly point at localized pages, and with fallbacks off most of those no longer exist. One site cut its generated `_redirects` from ~1,600 lines to 206 by turning `localize_redirects` off after disabling fallbacks, with nothing lost. Worth re-checking rather than leaving on out of habit.
+
 ### Separating Language Code from URL Slug (`language_slugs`)
 _Unreleased_
 
@@ -342,6 +346,19 @@ Pipe the language through the `lang_slug` filter wherever it becomes a **path**:
 Keep using the bare code for `hreflang`, `<html lang>` and `site.data[lang]` lookups - the
 filter is only for the path segment. It returns the code unchanged for any language you
 haven't given a slug, so it is safe to adopt everywhere before you need it.
+
+#### Audit your existing redirects before adopting a slug
+
+If your site predates `language_slugs`, it may carry hand-written rules that were correct
+when the code *was* the path. A rule like:
+
+```
+/pt-br/* /pt-BR/:splat 301
+```
+
+now points the wrong way — and on a host that lower-cases paths it can loop against the
+host's own normalisation. Reverse or delete rules like this in the same change that
+introduces the slug.
 
 *Alternative that needs no gem update:* rename your `_data/pt-BR/` directory to `_data/pt-br/` and list `"pt-br"` in `languages` instead of `"pt-BR"`. `normalize_lang` is case-insensitive, so existing `lang: pt-BR` front matter keeps matching. Pick whichever approach suits you - `language_slugs` if you want to keep authoring content with the correct BCP 47 tag, the rename if you'd rather not touch your config.
 
