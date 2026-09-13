@@ -194,6 +194,7 @@ module Jekyll
       approved = {}
       # Build set of valid languages (default + configured)
       valid_languages = ([@default_lang] + @languages).uniq
+      canonical_base = "#{config['url']}#{@baseurl}"
 
       docs.each do |doc|
         # Normalize language codes for comparison
@@ -224,6 +225,10 @@ module Jekyll
         # Set rendered_lang to indicate what language this page is actually rendered in
         # This allows templates to detect fallback pages (rendered_lang != active_lang)
         doc.data['rendered_lang'] = lang
+        # Publish the canonical URL as document data so jekyll-seo-tag (which
+        # already reads page['canonical_url']) agrees with I18n_Headers on
+        # both <link rel="canonical"> and og:url. ||= so front matter wins.
+        doc.data['canonical_url'] ||= canonical_base + (@active_lang == @default_lang ? url : "/#{@active_lang}#{url}")
 
         # skip entirely if nothing to check
         next if @file_langs.nil?

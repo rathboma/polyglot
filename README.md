@@ -259,6 +259,16 @@ This improves SEO by:
 - Signaling to search engines which version is the authoritative source
 
 Note: `hreflang` URLs pointing to the default language or `x-default` are intentionally NOT relativized, as they should always point to the canonical language-specific URLs.
+
+**Canonical URL as document data (`canonical_url`):**
+_Unreleased_
+
+Polyglot also publishes the canonical URL as `page.canonical_url` on every document, computed from that document's own URL (so per-language slugs set via `page_id` come through automatically). This is additive - `{% I18n_Headers %}` keeps emitting its own `<link rel="canonical">` tag as described above - but it means other plugins that read `page['canonical_url']` agree with it.
+
+In particular, [jekyll-seo-tag](https://github.com/jekyll/jekyll-seo-tag) already reads `page['canonical_url']` for both its `<link rel="canonical">` and `og:url` output. Previously, jekyll-seo-tag would build `og:url` from the unprefixed `page.url`, so a real *french* translation at `/fr/menu` would ship `og:url=/menu` while `{% I18n_Headers %}`'s own canonical correctly pointed at `/fr/menu` - a mismatch. With `canonical_url` now set, the two agree.
+
+If you set `canonical_url` yourself in a document's front matter, Polyglot will never overwrite it.
+
 ### Localizing Netlify _redirects
 _New in 1.12.0_
 

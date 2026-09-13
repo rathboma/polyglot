@@ -205,5 +205,43 @@ Dir.mktmpdir do |_|
         expect(menu_output.scan(/hreflang="([^"]+)"/).flatten).to contain_exactly('en', 'x-default', 'es', 'fr')
       end
     end
+
+    describe 'canonical_url document data' do
+      it "fr pass: sets an /fr-prefixed canonical_url using each document's own url" do
+        site = build_site('url' => 'https://example.com')
+        site.process_language 'fr'
+        menu = site.pages.find { |doc| doc.name == 'fr.menu.md' }
+        contact = site.pages.find { |doc| doc.name == 'fr.contact.md' }
+        expect(menu.data['canonical_url']).to eq('https://example.com/fr/le-menu')
+        expect(contact.data['canonical_url']).to eq('https://example.com/fr/nous-contacter')
+      end
+
+      it 'en pass: canonical_url is unprefixed' do
+        site = build_site('url' => 'https://example.com')
+        site.process_language 'en'
+        about = site.pages.find { |doc| doc.name == 'en.about.md' }
+        expect(about.data['canonical_url']).to eq('https://example.com/about')
+      end
+
+      it 'never overwrites a front-matter canonical_url' do
+        site = build_site('url' => 'https://example.com')
+        site.process_language 'en'
+        collection = Jekyll::Collection.new(site, 'test')
+        doc = Jekyll::Document.new('test.md', site: site, collection: collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['permalink'] = '/custom/'
+          d.data['canonical_url'] = 'https://mysite.example/pinned/'
+        end
+        site.coordinate_documents([doc])
+        expect(doc.data['canonical_url']).to eq('https://mysite.example/pinned/')
+      end
+
+      it 'is absolute and includes the configured baseurl' do
+        site = build_site('url' => 'https://example.com', 'baseurl' => '/blog')
+        site.process_language 'fr'
+        menu = site.pages.find { |doc| doc.name == 'fr.menu.md' }
+        expect(menu.data['canonical_url']).to eq('https://example.com/blog/fr/le-menu')
+      end
+    end
   end
 end
