@@ -339,9 +339,13 @@ Pipe the language through the `lang_slug` filter wherever it becomes a **path**:
 
 ```liquid
 {% for lang in site.languages %}
-  <a href="{{ site.baseurl }}/{{ lang | lang_slug }}/about" hreflang="{{ lang }}">{{ lang }}</a>
+  {% capture prefix %}{% unless lang == site.default_lang %}/{{ lang | lang_slug }}{% endunless %}{% endcapture %}
+  <a href="{{ site.baseurl }}{{ prefix }}/about" hreflang="{{ lang }}">{{ lang }}</a>
 {% endfor %}
 ```
+
+(The `unless` matters as much as the filter: the default language is served unprefixed, so
+emitting `/en/about` for it links at a page that was never built.)
 
 Keep using the bare code for `hreflang`, `<html lang>` and `site.data[lang]` lookups - the
 filter is only for the path segment. It returns the code unchanged for any language you
