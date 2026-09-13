@@ -188,6 +188,11 @@ module Jekyll
     def coordinate_documents(docs)
       regex = document_url_regex
       approved = {}
+      # page_id => { lang => permalink } for every document that was read, the
+      # ones this language build discards included.  Documents without an
+      # explicit page_id are keyed by their language stripped url, so an
+      # ordinary blog post can be matched with its translations as well.
+      translations = {}
       # Build set of valid languages (default + configured)
       valid_languages = ([@default_lang] + @languages).uniq
 
@@ -221,6 +226,12 @@ module Jekyll
         # This allows templates to detect fallback pages (rendered_lang != active_lang)
         doc.data['rendered_lang'] = lang
 
+        # remember where this language version lives before the document is
+        # filtered out of the build, so the surviving document still knows
+        # which languages it has been translated into
+        translations[page_id] ||= {}
+        translations[page_id][lang] ||= doc.data['permalink'] || url
+
         # skip entirely if nothing to check
         next if @file_langs.nil?
         # skip this document if it has already been processed
@@ -233,9 +244,11 @@ module Jekyll
         approved[page_id] = doc
         @file_langs[page_id] = lang
       end
-      approved.each_value do |doc|
+      approved.each do |page_id, doc|
         assignPageRedirects(doc, docs)
         assignPageLanguagePermalinks(doc, docs)
+        assignTranslatedPermalinks(doc, translations[page_id])
+        assignCanonicalUrl(doc, translations[page_id])
       end
       approved.values
     end
@@ -304,6 +317,53 @@ module Jekyll
       end
     end
 
+    # fills in the permalinks of the translations that assignPageLanguagePermalinks
+    # cannot see.  It only looks at documents with an explicit page_id, while
+    # most sites match a document to its translations by filename or path, so
+    # without this an ordinary blog post looks untranslated to i18n_headers.
+    def assignTranslatedPermalinks(doc, translated_permalinks)
+      return if translated_permalinks.nil? || translated_permalinks.empty?
+
+      permalink_lang = doc.data['permalink_lang'] || {}
+      translated_permalinks.each do |lang, permalink|
+        permalink_lang[lang] ||= permalink
+      end
+      doc.data['permalink_lang'] = permalink_lang
+    end
+
+    # the permalink a document canonicalises to in the language being built.
+    # A document with a real translation canonicalises to that translation,
+    # while a document rendered as a fallback canonicalises to the default
+    # language version when fallback_canonical_to_default_lang is set, and to
+    # itself otherwise.
+    def canonical_permalink(doc, translated_permalinks)
+      translated_permalinks ||= {}
+      own_permalink = translated_permalinks[doc.data['rendered_lang']] ||
+        doc.data['permalink'] || doc.url
+
+      if @fallback_canonical_to_default_lang && !translated_permalinks.key?(@active_lang)
+        localize_permalink(translated_permalinks[@default_lang] || own_permalink, @default_lang)
+      else
+        localize_permalink(translated_permalinks[@active_lang] || own_permalink, @active_lang)
+      end
+    end
+
+    # prefixes a permalink with its language, the default language and already
+    # prefixed permalinks are left alone
+    def localize_permalink(permalink, lang)
+      permalink = "/#{permalink}" unless permalink.start_with?('/')
+      return permalink if lang == @default_lang || permalink.start_with?("/#{lang}/")
+
+      "/#{lang}#{permalink}"
+    end
+
+    # publishes the canonical url of a document as page.canonical_url, so that
+    # other plugins (jekyll-seo-tag, feeds, sitemaps) emit the same canonical
+    # url as the i18n_headers tag does
+    def assignCanonicalUrl(doc, translated_permalinks)
+      doc.data['canonical_url'] = "#{config['url']}#{config['baseurl']}#{canonical_permalink(doc, translated_permalinks)}"
+    end
+
     # performs any necessary operations on the documents before rendering them
     def process_documents(docs)
       # return if @active_lang == @default_lang
@@ -352,7 +412,10 @@ module Jekyll
         end
       end
       start = disabled ? 'ferh' : 'href'
-      %r{#{start}="?#{@baseurl}/((?:#{regex}[^,'"\s/?.]+\.?)*(?:/[^\]\[)("'\s]*)?)"}
+      # canonical links are never relativized, polyglot decides what a document
+      # canonicalises to and writes it out in full
+      neglookbehind = disabled ? "" : "(?<!rel=\"canonical\" )"
+      %r{#{neglookbehind}#{start}="?#{@baseurl}/((?:#{regex}[^,'"\s/?.]+\.?)*(?:/[^\]\[)("'\s]*)?)"}
     end
 
     # a regex that matches absolute urls in a html document
@@ -372,9 +435,12 @@ module Jekyll
         end
       end
       start = disabled ? 'ferh' : 'href'
-      # Build negative lookbehind to exclude hreflang URLs from relativization
-      # hreflang tags for default language and x-default should not be relativized
-      neglookbehind = disabled ? "" : "(?<!hreflang=\"#{@default_lang}\" |hreflang=\"x-default\" )"
+      # Build negative lookbehind to exclude hreflang and canonical URLs from
+      # relativization.  hreflang tags for the default language and x-default
+      # already point at the right url, and a canonical url is decided by
+      # polyglot (see canonical_permalink) rather than by the language of the
+      # page it appears on.
+      neglookbehind = disabled ? "" : "(?<!hreflang=\"#{@default_lang}\" |hreflang=\"x-default\" |rel=\"canonical\" )"
       %r{#{neglookbehind}#{start}="?#{url}#{@baseurl}/((?:#{regex}[^,'"\s/?.]+\.?)*(?:/[^\]\[)("'\s]*)?)"}
     end
 

@@ -324,14 +324,14 @@ describe Site do
       end
     end
 
-    it 'negative lookbehind for hreflang excludes default lang and x-default but not canonical' do
+    it 'negative lookbehind excludes default lang hreflang, x-default and canonical links' do
       @baseurls.each do |baseurl|
         @site.baseurl = baseurl
         @urls.each do |url|
           @site.config['url'] = url
           @absolute_url_regex = @site.absolute_url_regex(url)
-          # Canonical URLs SHOULD be matched so they get language prefix on translated pages
-          expect(@absolute_url_regex).to match "<link rel=\"canonical\" href=\"#{url}#{baseurl}/images/my-vacation-photo.jpg\">"
+          # Canonical URLs should NOT be matched, polyglot writes them out in full
+          expect(@absolute_url_regex).to_not match "<link rel=\"canonical\" href=\"#{url}#{baseurl}/images/my-vacation-photo.jpg\">"
           # hreflang for default lang and x-default should NOT be matched
           expect(@absolute_url_regex).to_not match "<link rel=\"alternate\" hreflang=\"#{@default_lang}\" href=\"#{url}#{baseurl}/images/my-vacation-photo.jpg\">"
           # hreflang for non-default languages should be matched (they need relativization)
@@ -1219,7 +1219,7 @@ describe Site do
       expect(output).to include('hreflang="x-default"')
     end
 
-    it 'absolute_url_regex matches canonical URLs for relativization' do
+    it 'absolute_url_regex does not match canonical URLs' do
       @site.config['baseurl'] = ''
       @site.config['url'] = 'https://test.github.io'
       @site.config['languages'] = ['en', 'fr']
@@ -1229,11 +1229,25 @@ describe Site do
       url = 'https://test.github.io'
       @absolute_url_regex = @site.absolute_url_regex(url)
 
-      # Canonical URLs SHOULD be matched so they get language prefix on translated pages
-      expect(@absolute_url_regex).to match '<link rel="canonical" href="https://test.github.io/about">'
+      # Canonical URLs should NOT be matched. A fallback page canonicalises to the
+      # default language, so relativizing it would point it back at itself.
+      expect(@absolute_url_regex).to_not match '<link rel="canonical" href="https://test.github.io/about">'
       # hreflang URLs should NOT be matched (they already have correct URLs)
       expect(@absolute_url_regex).to_not match '<link rel="alternate" hreflang="en" href="https://test.github.io/about">'
       expect(@absolute_url_regex).to_not match '<link rel="alternate" hreflang="x-default" href="https://test.github.io/about">'
+      # ordinary links are still matched
+      expect(@absolute_url_regex).to match '<a href="https://test.github.io/about">'
+    end
+
+    it 'relative_url_regex does not match canonical URLs' do
+      @site.config['baseurl'] = ''
+      @site.config['languages'] = ['en', 'fr']
+      @site.config['default_lang'] = 'en'
+      @site.prepare
+      @site.baseurl = ''
+
+      expect(@site.relative_url_regex).to_not match '<link rel="canonical" href="/about">'
+      expect(@site.relative_url_regex).to match '<a href="/about">'
     end
 
     it 'fallback_canonical_to_default_lang defaults to false' do
