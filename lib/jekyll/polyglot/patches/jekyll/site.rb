@@ -9,6 +9,7 @@ module Jekyll
 
     def prepare
       @file_langs = {}
+      @untranslated_urls = {}
       fetch_languages
       @parallel_localization = config.fetch('parallel_localization', true)
       # When true (and parallel_localization is also true), the default
@@ -158,6 +159,7 @@ module Jekyll
       old_dest = @dest
       old_exclude = @exclude
       @file_langs = {}
+      @untranslated_urls = {}
       @dest = "#{@dest}/#{lang_slug(@active_lang)}"
       @exclude += @exclude_from_localization
       process_orig
@@ -197,6 +199,41 @@ module Jekyll
       nil
     end
 
+    # Remembers the urls of pages the active language has no version of, so
+    # links to them are left pointing at the default language instead of being
+    # relativized to a URL that was never generated. Only meaningful with
+    # generate_fallback_pages off - with fallbacks on, every page exists in
+    # every language.
+    def record_untranslated_urls(urls_by_page_id)
+      return if @generate_fallback_pages || @active_lang == @default_lang
+
+      @untranslated_urls ||= {}
+      urls_by_page_id.each do |page_id, urls|
+        # With fallbacks off, a page_id reaches @file_langs only when this
+        # language has its own version of it, so anything missing here is a
+        # page the pass did not generate.
+        next if @file_langs&.key?(page_id)
+
+        urls.each { |url| @untranslated_urls[normalize_url_key(url)] = true }
+      end
+    end
+
+    # True when a link target is a page this language pass does not generate.
+    def untranslated_url?(path)
+      return false if @untranslated_urls.nil? || @untranslated_urls.empty?
+
+      @untranslated_urls.key?(normalize_url_key(path))
+    end
+
+    # Reduces a url or href path to a comparable key: leading slash, no
+    # trailing slash, no anchor or query string.
+    def normalize_url_key(url)
+      key = url.to_s.split(/[#?]/).first.to_s
+      key = "/#{key}" unless key.start_with?('/')
+      key = key.chomp('/')
+      key.empty? ? '/' : key
+    end
+
     # Builds the absolute canonical URL for a document url in the active
     # language pass. The default language is unprefixed; other languages are
     # prefixed with their slug, unless the url already carries it.
@@ -230,6 +267,9 @@ module Jekyll
       approved = {}
       # Build set of valid languages (default + configured)
       valid_languages = ([@default_lang] + @languages).uniq
+      # Every url each page is known by, so links to pages this language pass
+      # doesn't generate can be left pointing at the default language.
+      urls_by_page_id = Hash.new { |hash, key| hash[key] = [] }
 
       docs.each do |doc|
         # Normalize language codes for comparison
@@ -265,6 +305,9 @@ module Jekyll
         # both <link rel="canonical"> and og:url. ||= so front matter wins.
         doc.data['canonical_url'] ||= canonical_url_for(url)
 
+        # Record what this page is called, before the skips below drop the doc
+        urls_by_page_id[page_id] << url
+
         # skip entirely if nothing to check
         next if @file_langs.nil?
         # skip this document if fallback pages are disabled and it isn't in the active language
@@ -279,6 +322,7 @@ module Jekyll
         approved[page_id] = doc
         @file_langs[page_id] = lang
       end
+      record_untranslated_urls(urls_by_page_id)
       approved.each_value do |doc|
         assignPageRedirects(doc, docs)
         assignPageLanguagePermalinks(doc, docs)
@@ -428,7 +472,14 @@ module Jekyll
       return if doc.output.nil?
 
       modified_output = doc.output.dup
-      modified_output.gsub!(regex, "href=\"#{@baseurl}/#{lang_slug(@active_lang)}/\\1\"")
+      modified_output.gsub!(regex) do
+        path = Regexp.last_match(1)
+        if untranslated_url?(path)
+          Regexp.last_match(0)
+        else
+          "href=\"#{@baseurl}/#{lang_slug(@active_lang)}/#{path}\""
+        end
+      end
       doc.output = modified_output
     end
 
@@ -436,7 +487,14 @@ module Jekyll
       return if doc.output.nil?
 
       modified_output = doc.output.dup
-      modified_output.gsub!(regex, "href=\"#{url}#{@baseurl}/#{lang_slug(@active_lang)}/\\1\"")
+      modified_output.gsub!(regex) do
+        path = Regexp.last_match(1)
+        if untranslated_url?(path)
+          Regexp.last_match(0)
+        else
+          "href=\"#{url}#{@baseurl}/#{lang_slug(@active_lang)}/#{path}\""
+        end
+      end
       doc.output = modified_output
     end
 

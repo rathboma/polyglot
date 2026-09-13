@@ -8,7 +8,10 @@ All notable changes to jekyll-polyglot are documented here.
 - `generate_fallback_pages` config option (default `true`, backwards compatible). When set to
   `false`, a language pass only approves documents whose own language matches - no
   default-language body is generated under a localised URL for a translation that doesn't
-  exist. See README ("Disabling Fallback Pages").
+  exist. In-page links are handled to match: a link to a page this language has no version
+  of is left pointing at the default language rather than relativized to a URL that was
+  never generated. Links to pages that do have a translation relativize as before, as does
+  everything when fallbacks are on. See README ("Disabling Fallback Pages").
 - `canonical_url` is now published as document data on every page/post, computed from each
   document's own URL and prefixed with its language pass (or unprefixed for the default
   language). This lets jekyll-seo-tag's `<link rel="canonical">` and `og:url` agree with
