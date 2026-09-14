@@ -205,15 +205,17 @@ becomes
 
 #### Canonical URL Handling
 
-For proper canonical URL handling on multilingual sites, we recommend using Polyglot's `{% I18n_Headers %}` tag for canonical URLs instead of jekyll-seo-tag's default canonical output. This provides intelligent canonical URL generation that:
+Polyglot works out the canonical URL of every page, post and collection document while it coordinates translations, and publishes it as `page.canonical_url`:
 
-- Points to the translated URL for pages with actual translations
-- Points to the default language URL for fallback pages (pages without translations)
-- Properly handles the `page_id` and permalink matching for translation detection
+- Documents with a real translation canonicalize to that translation
+- Fallback documents canonicalize to the default language version when `fallback_canonical_to_default_lang` is enabled, and to themselves otherwise
+- Translations are matched by `page_id`, by permalink, and by filename or path, so an ordinary blog post with no front matter beyond a title is matched too
+
+`{% I18n_Headers %}` writes that URL out as `<link rel="canonical">`. Canonical links are never touched by Polyglot's URL relativization, so a fallback page keeps pointing at the default language instead of being rewritten to point at itself.
 
 **Setup with jekyll-seo-tag:**
 
-If you're using [jekyll-seo-tag](https://github.com/jekyll/jekyll-seo-tag), disable its canonical output and let Polyglot handle it:
+[jekyll-seo-tag](https://github.com/jekyll/jekyll-seo-tag) reads `page.canonical_url`, so its canonical output is correct without any configuration. If you emit both tags, turn one of the two canonicals off to avoid duplicating it:
 
 ```liquid
 {% seo canonical=false %}
@@ -234,12 +236,14 @@ With this option enabled:
 - Pages with actual translations: canonical points to the translated URL (e.g., `/es/sobre-nosotros/`)
 - Fallback pages (no translation): canonical points to the default language URL (e.g., `/about/` instead of `/es/about/`)
 
+This applies to every kind of content - pages, posts and custom collections - whether or not the document sets a `permalink` or a `page_id`.
+
 This improves SEO by:
 - Preventing search engines from indexing duplicate fallback content under multiple language URLs
 - Consolidating SEO authority to the original content
 - Signaling to search engines which version is the authoritative source
 
-Note: `hreflang` URLs pointing to the default language or `x-default` are intentionally NOT relativized, as they should always point to the canonical language-specific URLs.
+Note: `hreflang` URLs pointing to the default language or `x-default`, and `rel="canonical"` links, are intentionally NOT relativized, as they should always point to the URL Polyglot chose for them.
 ### Localizing Netlify _redirects
 _New in 1.12.0_
 
@@ -372,6 +376,7 @@ This plugin stands out from other I18n Jekyll plugins.
 - provides the liquid tag `{{ site.default_lang }}` to get the default_lang I18n string.
 - provides the liquid tag `{{ site.active_lang }}` to get the I18n language string the website was built for. Alternative names for `active_lang` can be configured via `config.lang_vars`.
 - provides the liquid tag `{{ page.rendered_lang }}` to get the language the page content is actually rendered in (useful for detecting fallback pages).
+- provides the liquid tag `{{ page.canonical_url }}` with the canonical url of the page in the language being built, for other plugins such as jekyll-seo-tag to pick up.
 - provides the liquid tag `{{ I18n_Headers }}` to append SEO bonuses to your website.
 - provides the liquid tag `{{ Unrelativized_Link href="/hello" }}` to make urls that do not get influenced by url correction regexes.
 - provides `site.data` localization for efficient rich text replacement.

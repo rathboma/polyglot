@@ -76,7 +76,15 @@ module Jekyll
             # Don't add language prefix if it's already in the permalink
             current_permalink.start_with?("/#{current_lang}/") ? current_permalink : "/#{current_lang}#{current_permalink}"
           end
-          i18n += "<link rel=\"canonical\" href=\"#{site_url}#{canonical_permalink}\"/>\n"
+          # Site#assignCanonicalUrl works out the same url from the full set of
+          # translations, including the ones this build dropped, so prefer it
+          # whenever it is available and this tag was not given an explicit url
+          canonical_href = if @url.empty? && !page['canonical_url'].to_s.empty?
+            page['canonical_url']
+          else
+            "#{site_url}#{canonical_permalink}"
+          end
+          i18n += "<link rel=\"canonical\" href=\"#{canonical_href}\"/>\n"
 
           # Get the default language permalink for x-default
           default_lang_permalink = lang_to_permalink[site.default_lang] || (permalink_lang && permalink_lang[site.default_lang]) || normalized_permalink

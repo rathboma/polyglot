@@ -293,6 +293,51 @@ describe 'canonical urls for fallback content' do
     end
   end
 
+  describe 'with fallback_canonical_to_default_lang disabled' do
+    before do
+      write_file('_posts/2024-06-01-untranslated-post.md', <<~POST)
+        ---
+        layout: default
+        title: Untranslated Post
+        ---
+        Only written in English.
+      POST
+      build_site('fallback_canonical_to_default_lang' => false)
+    end
+
+    it 'leaves a fallback page canonicalised to itself' do
+      expect(canonical_in('de/2024/06/01/untranslated-post.html'))
+        .to eq('https://example.com/de/2024/06/01/untranslated-post.html')
+      expect(canonical_url_attribute_in('de/2024/06/01/untranslated-post.html'))
+        .to eq('https://example.com/de/2024/06/01/untranslated-post.html')
+    end
+
+    it 'canonicalises the default language build to itself' do
+      expect(canonical_in('2024/06/01/untranslated-post.html'))
+        .to eq('https://example.com/2024/06/01/untranslated-post.html')
+    end
+  end
+
+  describe 'with a baseurl' do
+    before do
+      write_file('_posts/2024-07-01-untranslated-post.md', <<~POST)
+        ---
+        layout: default
+        title: Untranslated Post
+        ---
+        Only written in English.
+      POST
+      build_site('baseurl' => '/polyglot')
+    end
+
+    it 'includes the baseurl in the canonical url of a fallback page' do
+      expect(canonical_in('de/2024/07/01/untranslated-post.html'))
+        .to eq('https://example.com/polyglot/2024/07/01/untranslated-post.html')
+      expect(canonical_url_attribute_in('de/2024/07/01/untranslated-post.html'))
+        .to eq('https://example.com/polyglot/2024/07/01/untranslated-post.html')
+    end
+  end
+
   describe 'root cause: post-render url relativization rewrites the canonical link' do
     it 'leaves the canonical link of a fallback document alone' do
       site = Site.new(
