@@ -50,20 +50,23 @@ def hook_redirects(site)
     # Only process paths that start with /
     next unless source.start_with?('/')
 
-    # Skip if source already has a language prefix
-    next if site.languages.any? { |lang| source.start_with?("/#{lang}/") || source == "/#{lang}" }
+    # Skip if source already has a language prefix, by language code or by
+    # its lang_urls segment
+    next if site.lang_url_segments.any? { |segment| source.start_with?("/#{segment}/") || source == "/#{segment}" }
 
-    # Add localized versions for non-default languages
+    # Add localized versions for non-default languages, under the url
+    # segment each language is served from (see lang_urls)
     site.languages.each do |lang|
       next if lang == site.default_lang
 
-      localized_source = "/#{lang}#{source}"
+      lang_url = site.lang_url(lang)
+      localized_source = "/#{lang_url}#{source}"
       destination = parts[1]
 
       # Localize destination if it's an internal path (starts with /)
       # but not if it's an external URL (contains ://)
       localized_destination = if destination.start_with?('/') && !destination.include?('://')
-                                "/#{lang}#{destination}"
+                                "/#{lang_url}#{destination}"
                               else
                                 destination
                               end

@@ -35,13 +35,14 @@ module Jekyll
       localized
     end
 
-    # recursively merges the lang subtree of data over the rest of data
+    # Recursively merges the lang subtree of data over the rest of data.
+    # data directories are matched by their exact language code, like every
+    # other language code (see Site#unconfigured_lang_allowed?)
     # See: https://www.ruby-forum.com/topic/142809
     def merge_lang_data(data, lang)
-      key = data.keys.find { |k| k.to_s.downcase == lang.to_s.downcase }
-      return data unless data[key].is_a?(Hash)
+      return data unless data[lang].is_a?(Hash)
 
-      data.merge(data[key], &data_merger)
+      data.merge(data[lang], &data_merger)
     end
 
     def data_merger
