@@ -256,8 +256,10 @@ describe Site do
     it 'should report a path segment that only differs from a configured language by case as that language' do
       collection = Jekyll::Collection.new(@site, 'pt-br')
       document = Jekyll::Document.new('missing/pt-BR/sobre.md', site: @site, collection: collection)
+      @site.config['unconfigured_lang'] = 'error'
+      @site.prepare
       expect(@site.derive_lang_from_path(document)).to eq('pt-BR')
-      # which is not a configured language, so by default the build fails
+      # which is not a configured language, so with unconfigured_lang: error the build fails
       expect { @site.coordinate_documents([document]) }.to raise_error(
         Jekyll::Errors::FatalException,
         %r{missing/pt-BR/sobre\.md has path segment 'pt-BR' which is not one of the configured languages \["en", "es", "pt-br"\], did you mean 'pt-br'\? Language codes are case sensitive}
@@ -385,8 +387,8 @@ describe Site do
       end
     end
 
-    it 'fails the build by default' do
-      expect(strict_site.unconfigured_lang).to eq('error')
+    it 'generates documents in unconfigured languages by default, like older releases' do
+      expect(strict_site.unconfigured_lang).to eq('generate')
     end
 
     it 'refuses an unconfigured_lang value it does not know' do
@@ -395,7 +397,7 @@ describe Site do
 
     describe 'with unconfigured_lang: error' do
       before do
-        @strict_site = strict_site
+        @strict_site = strict_site('unconfigured_lang' => 'error')
       end
 
       it 'fails the build when a document lang differs from a configured language only by case' do
@@ -505,7 +507,15 @@ describe Site do
 
     describe 'with lang_from_path' do
       before do
-        @path_site = strict_site('lang_from_path' => true)
+        @path_site = strict_site('lang_from_path' => true, 'unconfigured_lang' => 'error')
+      end
+
+      it 'falls back to the default language for a mis-cased path segment with unconfigured_lang: generate, like older releases' do
+        generate_site = strict_site('lang_from_path' => true)
+        doc = doc_for(generate_site, '_posts/pt-br/2024-01-01-caminho.md', {})
+        expect(generate_site.derive_lang_from_path(doc)).to be_nil
+        expect(generate_site.coordinate_documents([doc])).to eq([doc])
+        expect(doc.data['rendered_lang']).to eq('en')
       end
 
       it 'derives the language from a path segment that matches a configured language exactly' do
@@ -518,7 +528,7 @@ describe Site do
         expect(@path_site.derive_lang_from_path(doc_for(@path_site, 'about.PT-BR.md', {}))).to eq('PT-BR')
       end
 
-      it 'fails the build on such a path segment by default' do
+      it 'fails the build on such a path segment with unconfigured_lang: error' do
         expect { @path_site.coordinate_documents([doc_for(@path_site, '_posts/pt-br/2024-01-01-caminho.md', {})]) }.to raise_error(
           Jekyll::Errors::FatalException,
           /caminho\.md has path segment 'pt-br' which is not one of the configured languages .*did you mean 'pt-BR'/
@@ -1816,11 +1826,12 @@ describe Site do
       end
     end
 
-    it 'fails the build when a document declares pt-br on a site configured with pt-BR' do
+    it 'fails the build with unconfigured_lang: error when a document declares pt-br on a site configured with pt-BR' do
       @site.config['baseurl'] = ''
       @site.config['url'] = 'https://test.github.io'
       @site.config['languages'] = ['en', 'pt-BR']
       @site.config['default_lang'] = 'en'
+      @site.config['unconfigured_lang'] = 'error'
       @site.prepare
 
       # Files are written to _site/<lang>/ using the configured code, so a
@@ -1850,10 +1861,11 @@ describe Site do
         @collection = Jekyll::Collection.new(@site, 'test')
       end
 
-      it 'should fail the build for documents with an unconfigured lang in frontmatter' do
+      it 'should fail the build for documents with an unconfigured lang in frontmatter with unconfigured_lang: error' do
         # Configure site with only en and es
         @site.config['languages'] = ['en', 'es']
         @site.config['default_lang'] = 'en'
+        @site.config['unconfigured_lang'] = 'error'
         @site.prepare
 
         docs = [
@@ -1897,8 +1909,8 @@ describe Site do
       end
 
       it 'should not treat an unconfigured language as the default language' do
-        # An explicit unconfigured lang must never be silently served as
-        # default_lang content, the build fails instead
+        # With the default unconfigured_lang: generate the document is built,
+        # but under its own language, never as default_lang content
         @site.config['languages'] = ['en', 'es']
         @site.config['default_lang'] = 'en'
         @site.prepare
@@ -1907,19 +1919,20 @@ describe Site do
         doc.data['lang'] = 'de'
         doc.data['title'] = 'German Page'
 
-        expect { @site.coordinate_documents([doc]) }.to raise_error(Jekyll::Errors::FatalException, /has lang 'de'/)
-        expect(doc.data['rendered_lang']).to be_nil
+        expect(@site.coordinate_documents([doc])).to eq([doc])
+        expect(doc.data['lang']).to eq('de')
+        expect(doc.data['rendered_lang']).to eq('de')
       end
     end
 
-    it 'should fail the build when pages exist for languages the site is not configured for' do
+    it 'fails the build for pages in unconfigured languages with unconfigured_lang: error, and skips them with ignore' do
       # Real-world scenario: a site configured with a reduced language list
       # (e.g. a dev build) while pages exist for the full production language
-      # list. Serving the German page as default language content would be
-      # wrong, and silently dropping it hides the misconfiguration, so the
-      # build fails and names the offending page and language.
+      # list. With unconfigured_lang: error the build fails and names the
+      # offending page and language, with ignore the page is left out.
       @site.config['languages'] = ['en', 'pt-BR']
       @site.config['default_lang'] = 'en'
+      @site.config['unconfigured_lang'] = 'error'
       @site.prepare
 
       # Simulate Jekyll::Page objects using OpenStruct (like site.pages)

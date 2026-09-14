@@ -273,8 +273,8 @@ describe 'lang_urls' do
       PAGE
     end
 
-    it 'fails the build by default instead of guessing which language was meant' do
-      expect { build_site }.to raise_error(
+    it 'fails the build with unconfigured_lang: error instead of guessing which language was meant' do
+      expect { build_site('unconfigured_lang' => 'error') }.to raise_error(
         Jekyll::Errors::FatalException,
         /errado\.md has lang 'pt-br' which is not one of the configured languages \["en", "es", "pt-BR"\], did you mean 'pt-BR'\? Language codes are case sensitive/
       )
@@ -287,8 +287,9 @@ describe 'lang_urls' do
       expect(Dir.glob(File.join(@dest, '**', 'errado', 'index.html'))).to eq([])
     end
 
-    it 'builds the document under its own language with unconfigured_lang: generate' do
-      build_site('unconfigured_lang' => 'generate')
+    it 'builds the document under its own language by default, like older releases' do
+      site = build_site
+      expect(site.unconfigured_lang).to eq('generate')
       # no configured document exists for /errado/, so the pt-br document is
       # rendered as the fallback of every language build
       expect(File.exist?(File.join(@dest, 'errado/index.html'))).to be true

@@ -22,7 +22,7 @@ module Jekyll
       @fallback_canonical_to_default_lang = config.fetch('fallback_canonical_to_default_lang', false)
       # what happens to a document whose language is not one of the configured
       # languages, see unconfigured_lang_allowed?
-      @unconfigured_lang = config.fetch('unconfigured_lang', 'error').to_s
+      @unconfigured_lang = config.fetch('unconfigured_lang', 'generate').to_s
       unless %w[error ignore generate].include?(@unconfigured_lang)
         raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: unconfigured_lang must be one of error, ignore or generate, got '#{@unconfigured_lang}'"
       end
@@ -103,9 +103,10 @@ module Jekyll
     # exactly. A document declaring a language the site is not configured for
     # is a typo, a mis-cased code or a language the site does not build, and
     # the unconfigured_lang option decides what happens to it:
-    #   error    - fail the build naming the file and the code (the default)
+    #   generate - build the document regardless, as older polyglot versions
+    #              did (the default, for compatibility with them)
     #   ignore   - warn and leave the document out of every language build
-    #   generate - build the document regardless, as older polyglot versions did
+    #   error    - fail the build naming the file and the code
     # Returns whether the document may be built with the given language.
     def unconfigured_lang_allowed?(doc, lang, attribute = 'lang')
       return true if all_languages.include?(lang)
@@ -247,9 +248,13 @@ module Jekyll
       end
 
       # a segment of the project relative path that only differs from a
-      # configured language by case is a mis-cased language code, not default
-      # language content, so report it as the (unconfigured) language of the
-      # document and let unconfigured_lang decide what happens to it
+      # configured language by case is a mis-cased language code rather than
+      # default language content. With unconfigured_lang set to error or ignore
+      # it is reported as the (unconfigured) language of the document, while
+      # generate keeps the behaviour of older releases and falls back to the
+      # default language
+      return nil if @unconfigured_lang == 'generate'
+
       split_on_multiple_delimiters(doc.relative_path.to_s).find do |segment|
         all_languages.any? { |lang| lang.casecmp?(segment) }
       end
