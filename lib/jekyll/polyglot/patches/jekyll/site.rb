@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang, :lang_urls
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :serial_default_lang, :lang_urls
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -33,15 +33,6 @@ module Jekyll
       @default_lang = config.fetch('default_lang', 'en')
       @languages = config.fetch('languages', ['en']).uniq
 
-      # Create normalized lookup hash: lowercase -> original case
-      # Include default_lang so it's always recognized even if not in languages array
-      @lang_norm_map = {}
-      @lang_norm_map[@default_lang.downcase] = @default_lang
-      @languages.each { |lang| @lang_norm_map[lang.downcase] = lang }
-
-      # Store normalized versions for fast lookup
-      @languages_normalized = @languages.map(&:downcase)
-
       fetch_lang_urls
       # the sublanguage sites are written into their url segments, which the
       # default language build must not clean up
@@ -58,20 +49,17 @@ module Jekyll
     # while site.active_lang, hreflang tags and front matter keep using pt-BR.
     # Languages without an entry are served under their own language code.
     def fetch_lang_urls
-      @lang_urls = ([@default_lang] + @languages).uniq.to_h { |lang| [lang, lang] }
+      @lang_urls = all_languages.to_h { |lang| [lang, lang] }
       overrides = config.fetch('lang_urls', nil) || {}
       raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: lang_urls must map language codes to url segments, got #{overrides.inspect}" unless overrides.is_a?(Hash)
 
       overrides.each do |lang, url|
-        canonical = normalize_lang(lang.to_s)
+        lang = lang.to_s
         segment = url.to_s.strip.gsub(%r{\A/+|/+\z}, '')
-        if canonical.nil?
-          Jekyll.logger.warn "Polyglot:", "Ignoring lang_urls entry for '#{lang}', not in configured languages #{@lang_urls.keys.inspect}"
-        elsif segment.empty?
-          Jekyll.logger.warn "Polyglot:", "Ignoring lang_urls entry for '#{lang}', its url segment is empty"
-        else
-          @lang_urls[canonical] = segment
-        end
+        raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: lang_urls entry '#{lang}' is not one of the configured languages #{all_languages.inspect}#{case_hint(lang)}" unless @lang_urls.key?(lang)
+        raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: lang_urls entry '#{lang}' has an empty url segment" if segment.empty?
+
+        @lang_urls[lang] = segment
       end
 
       # two sublanguage sites written into the same directory would overwrite
@@ -83,7 +71,7 @@ module Jekyll
     # The url path segment a language is served under: its lang_urls entry
     # when configured, and the language code itself otherwise
     def lang_url(lang)
-      @lang_urls.fetch(lang) { @lang_urls.fetch(normalize_lang(lang), lang) }
+      @lang_urls.fetch(lang, lang)
     end
 
     # Every segment a language may appear as in a url: the language codes
@@ -98,23 +86,32 @@ module Jekyll
       [lang_url(lang), lang].uniq.map { |segment| "/#{segment}/" }
     end
 
-    # Normalizes a language code to its canonical form from config
-    # Returns the original case from config, or nil if not found
-    def normalize_lang(lang_code)
-      return nil if lang_code.nil? || lang_code.empty?
-      @lang_norm_map[lang_code.downcase]
+    # Every language the site builds: the default language and the configured
+    # languages
+    def all_languages
+      ([@default_lang] + @languages).uniq
     end
 
-    # Case-insensitive check if language exists in config
-    def lang_exists?(lang_code)
-      return false if lang_code.nil? || lang_code.empty?
-      @languages_normalized.include?(lang_code.downcase)
+    # Language codes are case sensitive and must match the configured languages
+    # exactly. A document declaring a language the site is not configured for
+    # is a typo, a mis-cased code or a stale language, so the build fails rather
+    # than silently serving the document as default language content.
+    def ensure_configured_lang!(doc, lang, attribute = 'lang')
+      return if all_languages.include?(lang)
+
+      raise Jekyll::Errors::FatalException, "Polyglot: #{doc.relative_path} has #{attribute} '#{lang}' which is not one of the configured languages #{all_languages.inspect}#{case_hint(lang)}"
+    end
+
+    # names the configured language a mis-cased code was probably meant to be
+    def case_hint(lang)
+      meant = all_languages.find { |configured| configured.casecmp?(lang.to_s) }
+      meant ? ", did you mean '#{meant}'? Language codes are case sensitive" : ''
     end
 
     alias process_orig process
     def process
       prepare
-      all_langs = ([@default_lang] + @languages).uniq
+      all_langs = all_languages
       if @parallel_localization
         if @serial_default_lang
           # Run the default language in the parent first to prime shared
@@ -223,11 +220,16 @@ module Jekyll
       end
 
       segments = split_on_multiple_delimiters(doc.path)
-      # loop through all segments and check if they match the language regex
+      # loop through all segments and return the first configured language
       segments.each do |segment|
-        # Use case-insensitive matching and return config case
-        normalized = normalize_lang(segment)
-        return normalized if normalized
+        return segment if @languages.include?(segment)
+      end
+
+      # a segment of the project relative path that only differs from a
+      # configured language by case is a mis-cased language code, not default
+      # language content, so fail the build rather than guess
+      split_on_multiple_delimiters(doc.relative_path.to_s).each do |segment|
+        ensure_configured_lang!(doc, segment, 'path segment') if all_languages.any? { |lang| lang.casecmp?(segment) }
       end
 
       nil
@@ -245,31 +247,17 @@ module Jekyll
       # explicit page_id are keyed by their language stripped url, so an
       # ordinary blog post can be matched with its translations as well.
       translations = {}
-      # Build set of valid languages (default + configured)
-      valid_languages = ([@default_lang] + @languages).uniq
 
       docs.each do |doc|
-        # Normalize language codes for comparison
-        doc_lang_raw = doc.data['lang'] || derive_lang_from_path(doc)
-        lang = normalize_lang(doc_lang_raw) || @default_lang
-
-        # FILTER: Skip documents whose explicit lang is not in configured languages.
-        # Check the raw value so that documents with an unconfigured lang like 'de'
-        # are excluded even though normalize_lang maps them to nil -> default_lang.
-        if doc_lang_raw && !normalize_lang(doc_lang_raw)
-          Jekyll.logger.warn "Polyglot:", "Skipping #{doc.relative_path} - lang '#{doc_lang_raw}' not in configured languages #{valid_languages.inspect}"
-          next
-        end
-
-        # Update the document's lang data to use canonical case
-        # This ensures downstream code always works with consistent casing
-        if doc_lang_raw && lang != doc_lang_raw
-          doc.data['lang'] = lang
-        end
+        lang = doc.data['lang'] || derive_lang_from_path(doc)
+        # a document in a language the site is not configured for, or with a
+        # mis-cased code, fails the build (see ensure_configured_lang!) instead
+        # of being skipped or served as default language content
+        ensure_configured_lang!(doc, lang) unless lang.nil?
+        lang ||= @default_lang
 
         lang_exclusive = doc.data['lang-exclusive'] || []
-        # Normalize lang-exclusive entries
-        lang_exclusive_normalized = lang_exclusive.map { |l| normalize_lang(l) }.compact
+        lang_exclusive.each { |exclusive_lang| ensure_configured_lang!(doc, exclusive_lang, 'lang-exclusive') }
 
         url = doc.url.gsub(regex, '/')
         page_id = doc.data['page_id'] || url
@@ -291,7 +279,7 @@ module Jekyll
         # skip this document if it has a fallback and it isn't assigned to the active language
         next if @file_langs[page_id] == @default_lang && lang != @active_lang
         # skip this document if it has lang-exclusive defined and the active_lang is not included
-        next if !lang_exclusive_normalized.empty? && !lang_exclusive_normalized.include?(@active_lang)
+        next if !lang_exclusive.empty? && !lang_exclusive.include?(@active_lang)
 
         approved[page_id] = doc
         @file_langs[page_id] = lang
@@ -341,20 +329,14 @@ module Jekyll
       if !pageId.nil? && !pageId.empty?
         unless doc.data['permalink_lang'] then doc.data['permalink_lang'] = {} end
 
-        # Build set of valid languages
-        valid_languages = ([@default_lang] + @languages).uniq
-
         permalinkDocs = docs.select do |dd|
           dd.data['page_id'] == pageId
         end
         permalinkDocs.each do |dd|
-          # Normalize the language code
-          doclang_raw = dd.data['lang'] || derive_lang_from_path(dd)
-          doclang = normalize_lang(doclang_raw) || @default_lang
-
-          # FILTER: Only include permalinks for configured languages.
-          # Check raw value so unconfigured languages are excluded.
-          next if doclang_raw && !normalize_lang(doclang_raw)
+          doclang = dd.data['lang'] || derive_lang_from_path(dd) || @default_lang
+          # only configured languages have a permalink, an unconfigured one
+          # fails the build in coordinate_documents
+          next unless all_languages.include?(doclang)
 
           doc.data['permalink_lang'][doclang] = dd.data['permalink']
         end

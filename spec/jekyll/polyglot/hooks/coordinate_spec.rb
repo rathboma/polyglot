@@ -61,6 +61,15 @@ Dir.mktmpdir do |_|
       expect(@site.data['strings']['banana']).to eq('banana') # Populated from @site.data['strings']['apple']
     end
 
+    it 'should only merge site.data for the exact language code' do
+      # data directories are matched case sensitively, like every language code
+      @site.data.delete('fr')
+      @site.data['FR'] = { 'foo' => 'FRBAR' }
+      @site.active_lang = 'fr'
+      hook_coordinate(@site)
+      expect(@site.data['foo']).to eq('enbar')
+    end
+
     it "site.process triggers :polyglot, :post_write hook" do
       hook_called = false
       Jekyll::Hooks.register(:polyglot, :post_write) do |_site|

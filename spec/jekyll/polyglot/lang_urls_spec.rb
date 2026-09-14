@@ -259,4 +259,26 @@ describe 'lang_urls' do
       expect(output_for('about/index.html')).to include('<a href="/pt-BR/">pt-BR</a>')
     end
   end
+
+  describe 'with a document declaring a mis-cased language' do
+    before do
+      write_file('errado.md', <<~PAGE)
+        ---
+        layout: default
+        title: Errado
+        lang: pt-br
+        permalink: /errado/
+        ---
+        Declares pt-br on a site configured with pt-BR.
+      PAGE
+    end
+
+    it 'fails the build instead of guessing which language was meant' do
+      expect { build_site }.to raise_error(
+        Jekyll::Errors::FatalException,
+        /errado\.md has lang 'pt-br' which is not one of the configured languages \["en", "es", "pt-BR"\], did you mean 'pt-BR'\? Language codes are case sensitive/
+      )
+      expect(Dir.exist?(File.join(@dest, 'pt-br'))).to be false
+    end
+  end
 end
