@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang, :fallback_to_default_lang
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -19,6 +19,13 @@ module Jekyll
       # every fork runs that setup at once. See README for details.
       @serial_default_lang = config.fetch('serial_default_lang', false)
       @lang_from_path = config.fetch('lang_from_path', false)
+      # When false, a document is only built into the languages it has been
+      # translated into.  A url with no translation is left out of that
+      # language's site entirely rather than being built from the default
+      # language content, so the site can redirect or 404 it instead of
+      # serving a page in the wrong language.  Documents opt in or out of it
+      # individually with `fallback` frontmatter.  See README for details.
+      @fallback_to_default_lang = config.fetch('fallback_to_default_lang', true)
       @fallback_canonical_to_default_lang = config.fetch('fallback_canonical_to_default_lang', false)
       @exclude_from_localization = config.fetch('exclude_from_localization', []).map do |e|
         if File.directory?(e) && e[-1] != '/'
@@ -240,6 +247,9 @@ module Jekyll
         next if @file_langs[page_id] == @default_lang && lang != @active_lang
         # skip this document if it has lang-exclusive defined and the active_lang is not included
         next if !lang_exclusive_normalized.empty? && !lang_exclusive_normalized.include?(@active_lang)
+        # skip this document if it would only be built as a fallback for a
+        # language it has no translation in, and fallbacks are turned off
+        next if fallback_document?(lang, lang_exclusive_normalized) && !build_fallback?(doc)
 
         approved[page_id] = doc
         @file_langs[page_id] = lang
@@ -251,6 +261,24 @@ module Jekyll
         assignCanonicalUrl(doc, translations[page_id])
       end
       approved.values
+    end
+
+    # a document is a fallback in the language being built when it is written
+    # in another language.  lang-exclusive names the languages a document is
+    # built for explicitly, so a document using it is never a fallback.
+    def fallback_document?(lang, lang_exclusive)
+      lang != @active_lang && lang_exclusive.empty?
+    end
+
+    # whether a document with no translation for the language being built is
+    # still built from the content of the language it is written in.  Follows
+    # the site wide fallback_to_default_lang option unless the document sets
+    # `fallback` frontmatter of its own.
+    def build_fallback?(doc)
+      fallback = doc.data['fallback']
+      return @fallback_to_default_lang if fallback.nil?
+
+      fallback
     end
 
     def assignPageRedirects(doc, docs)

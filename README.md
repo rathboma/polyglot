@@ -56,6 +56,14 @@ With `parallel_localization` on, polyglot forks one process per language and run
 
 The trade-off is small: the default language no longer runs alongside the others, so you get one fewer concurrent fork.
 
+#### Untranslated pages (`fallback_to_default_lang`)
+
+```yaml
+fallback_to_default_lang: false
+```
+
+Default: `true`. When a document has no translation for a language, polyglot builds it into that language's site anyway, using the content it does have. Set this to `false` to leave untranslated urls out of a language entirely, so you can redirect or 404 them instead of serving content in the wrong language. See [Turning fallback pages off](#turning-fallback-pages-off).
+
 #### Netlify _redirects localization
 If you are deploying to Netlify and use a `_redirects` file, you can enable automatic localization of redirects:
 ```yaml
@@ -146,6 +154,47 @@ Lets say you are building your website. You have an `/about/` page written in *e
 
 No worries. Polyglot ensures the sitemap of your *english* site matches your *french* site, matches your *swedish* and *german* sites too. In this case, because you specified a `default_lang` variable in your `_config.yml`, all sites missing their languages' counterparts will fallback to your `default_lang`, so content is preserved across different languages of your site.
 
+#### Turning fallback pages off
+
+Sometimes serving the *english* `/about/` page at `/fr/about/` is worse than not serving it at all, and you would rather send that visitor somewhere else. Add to your `_config.yml`:
+
+```yaml
+fallback_to_default_lang: false
+```
+
+and Polyglot builds each document only into the languages it has actually been translated into. With an `/about/` page written in *english* only, and a `/menu/` page written in *english* and *spanish*:
+
+| url | `fallback_to_default_lang: true` (the default) | `fallback_to_default_lang: false` |
+| --- | --- | --- |
+| `/about/` | built | built |
+| `/es/about/` | built, with the *english* content | not built |
+| `/menu/` | built | built |
+| `/es/menu/` | built | built |
+
+Nothing is written for `/es/about/`, leaving the url free for a redirect or a 404 page of your own, wherever you configure those - your host, your `_redirects` file, or your server.
+
+This cuts both ways: a page written only in *spanish* is no longer built into the *english* site either. Every document is built into exactly the languages it exists in, so unless you opt one back in below, `page.rendered_lang` matches `site.active_lang` on every page that gets built.
+
+**This applies to every document, including the ones you probably want everywhere.** Your home page, `404.html`, `sitemap.xml` and `robots.txt` are ordinary documents to Polyglot, so a language with no translation of them will not have them. Keep them with `fallback` frontmatter.
+
+##### Per document control with `fallback` frontmatter
+
+`fallback` frontmatter overrides the site wide setting for a single document:
+
+```
+---
+title: Home
+permalink: /
+lang: en
+fallback: true
+---
+```
+
+- `fallback: true` builds the document into every language, even when the site has fallbacks turned off
+- `fallback: false` builds the document only into its own language, even when the site has fallbacks turned on
+
+[`lang-exclusive`](#exclusive-site-language-generation) wins over both, in either direction: a document that names its languages explicitly is always built for exactly those languages.
+
 #### Smart hreflang Generation
 
 Polyglot only generates `hreflang` tags for languages that have actual translations. This improves SEO correctness by not advertising language alternatives that don't actually exist.
@@ -156,7 +205,7 @@ For example, if you have `/about.html` in English and Spanish but not French:
 - No `hreflang="fr"` is generated, even though a French fallback page exists
 
 This behavior:
-- Generates pages for all languages (fallback content is still served)
+- Generates pages for all languages (fallback content is still served, unless [fallback pages are turned off](#turning-fallback-pages-off))
 - Only advertises translations that actually exist via `hreflang` tags
 - Always includes `hreflang` for the default language and `x-default`
 
@@ -380,6 +429,7 @@ This plugin stands out from other I18n Jekyll plugins.
 - provides the liquid tag `{{ I18n_Headers }}` to append SEO bonuses to your website.
 - provides the liquid tag `{{ Unrelativized_Link href="/hello" }}` to make urls that do not get influenced by url correction regexes.
 - provides `site.data` localization for efficient rich text replacement.
+- can leave untranslated pages out of a language entirely with `fallback_to_default_lang: false`, so missing translations can be redirected instead of served in the wrong language.
 - a creator that will answer all of your questions and issues.
 
 ### Detecting Fallback Pages with `page.rendered_lang`

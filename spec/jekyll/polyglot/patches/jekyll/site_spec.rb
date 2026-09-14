@@ -1736,5 +1736,160 @@ describe Site do
         expect(docs[0].data['permalink_lang'].keys).not_to include('de')
       end
     end
+
+    describe 'fallback_to_default_lang' do
+      before do
+        @collection = Jekyll::Collection.new(@site, 'test')
+      end
+
+      # an /about/ page written only in the default language, and a /menu/
+      # page that has a spanish translation
+      def translated_and_untranslated_docs
+        [
+          Jekyll::Document.new('about.en.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'en'
+            doc.data['page_id'] = 'about'
+            doc.data['permalink'] = '/about/'
+          end,
+          Jekyll::Document.new('menu.en.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'en'
+            doc.data['page_id'] = 'menu'
+            doc.data['permalink'] = '/menu/'
+          end,
+          Jekyll::Document.new('menu.sp.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'sp'
+            doc.data['page_id'] = 'menu'
+            doc.data['permalink'] = '/menu/'
+          end
+        ]
+      end
+
+      def coordinate(docs, lang)
+        @site.file_langs = {}
+        @site.active_lang = lang
+        @site.coordinate_documents(docs)
+      end
+
+      it 'defaults to true so fallback pages keep being built' do
+        expect(@site.fallback_to_default_lang).to eq(true)
+      end
+
+      it 'is false when the site turns it off' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+        expect(@site.fallback_to_default_lang).to eq(false)
+      end
+
+      it 'builds untranslated documents in every language when enabled' do
+        coordinated = coordinate(translated_and_untranslated_docs, 'sp')
+
+        page_ids = coordinated.map { |d| d.data['page_id'] }
+        expect(page_ids).to include('about')
+        expect(page_ids).to include('menu')
+      end
+
+      it 'does not build untranslated documents when disabled' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        coordinated = coordinate(translated_and_untranslated_docs, 'sp')
+
+        page_ids = coordinated.map { |d| d.data['page_id'] }
+        expect(page_ids).not_to include('about')
+      end
+
+      it 'still builds translated documents when disabled' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        coordinated = coordinate(translated_and_untranslated_docs, 'sp')
+
+        menu = coordinated.find { |d| d.data['page_id'] == 'menu' }
+        expect(menu).not_to be_nil
+        expect(menu.data['lang']).to eq('sp')
+        expect(menu.data['rendered_lang']).to eq('sp')
+      end
+
+      it 'leaves the default language build with its own documents when disabled' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        coordinated = coordinate(translated_and_untranslated_docs, 'en')
+
+        page_ids = coordinated.map { |d| d.data['page_id'] }
+        expect(page_ids).to include('about')
+        expect(page_ids).to include('menu')
+        expect(coordinated.map { |d| d.data['lang'] }.uniq).to eq(['en'])
+      end
+
+      it 'keeps documents written in another language out of the default language build when disabled' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        docs = [
+          Jekyll::Document.new('samba.sp.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'sp'
+            doc.data['page_id'] = 'samba'
+            doc.data['permalink'] = '/samba/'
+          end
+        ]
+
+        expect(coordinate(docs, 'en')).to be_empty
+        expect(coordinate(docs, 'sp').length).to eq(1)
+      end
+
+      it 'still honours lang-exclusive when disabled' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        docs = [
+          Jekyll::Document.new('legal.en.md', site: @site, collection: @collection).tap do |doc|
+            doc.data['lang'] = 'en'
+            doc.data['page_id'] = 'legal'
+            doc.data['permalink'] = '/legal/'
+            doc.data['lang-exclusive'] = ['en', 'sp']
+          end
+        ]
+
+        expect(coordinate(docs, 'sp').length).to eq(1)
+        expect(coordinate(docs, 'fr')).to be_empty
+      end
+
+      it 'lets a document opt out of being a fallback with fallback frontmatter' do
+        docs = translated_and_untranslated_docs
+        docs[0].data['fallback'] = false
+
+        coordinated = coordinate(docs, 'sp')
+
+        page_ids = coordinated.map { |d| d.data['page_id'] }
+        expect(page_ids).not_to include('about')
+        expect(page_ids).to include('menu')
+      end
+
+      it 'lets a document opt in to being a fallback with fallback frontmatter' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        docs = translated_and_untranslated_docs
+        docs[0].data['fallback'] = true
+
+        coordinated = coordinate(docs, 'sp')
+
+        about = coordinated.find { |d| d.data['page_id'] == 'about' }
+        expect(about).not_to be_nil
+        expect(about.data['rendered_lang']).to eq('en')
+      end
+
+      it 'still knows about every translation of the documents it builds when disabled' do
+        @site.config['fallback_to_default_lang'] = false
+        @site.prepare
+
+        coordinated = coordinate(translated_and_untranslated_docs, 'sp')
+
+        menu = coordinated.find { |d| d.data['page_id'] == 'menu' }
+        expect(menu.data['permalink_lang']['en']).to eq('/menu/')
+        expect(menu.data['permalink_lang']['sp']).to eq('/menu/')
+      end
+    end
   end
 end
