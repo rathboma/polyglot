@@ -11,7 +11,7 @@ def hook_coordinate(site)
   merger = proc { |_key, v1, v2| v1.is_a?(Hash) && v2.is_a?(Hash) ? v1.merge(v2, &merger) : v2 }
 
   # data directories are matched by their exact language code, like every
-  # other language code (see Site#ensure_configured_lang!)
+  # other language code (see Site#unconfigured_lang_allowed?)
   if site.data.include?(site.default_lang)
     site.data = site.data.merge(site.data[site.default_lang], &merger)
   end

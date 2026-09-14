@@ -39,7 +39,7 @@ These configuration preferences indicate
 - whether to run language processing in parallel or serial. Set to `false` if building on Windows hosts, or if Polyglot collides with other Jekyll plugins. If a plugin breaks only when you turn this on, try [`serial_default_lang`](#parallel-safe-plugins-serial_default_lang) before giving up on parallel builds.
 - your jekyll website production url. Make sure this value is set; Polyglot requires this to relative site urls correctly, and to make functioning language switchers.
 
-The optional `lang_from_path: true` option enables getting the page language from a filepath segment seperated by `/` or `.`, e.g `de/first-one.md`, or `_posts/zh_HK/use-second-segment.md` , if the lang frontmatter isn't defined. Path segments must match a configured language code exactly: a segment that only differs by case, such as `pt-br` on a site configured with `pt-BR`, fails the build.
+The optional `lang_from_path: true` option enables getting the page language from a filepath segment seperated by `/` or `.`, e.g `de/first-one.md`, or `_posts/zh_HK/use-second-segment.md` , if the lang frontmatter isn't defined. Path segments must match a configured language code exactly: a segment that only differs by case, such as `pt-br` on a site configured with `pt-BR`, counts as that unconfigured language and by default fails the build (see `unconfigured_lang`).
 
 #### Custom language url paths (`lang_urls`)
 
@@ -100,7 +100,17 @@ or whatever appropriate [I18n language code](https://developer.chrome.com/docs/e
 the page should build for. And you're done. Ideally, when designing your site, you should
 organize files by their relative urls.
 
-Language codes are case sensitive and must match the `languages` in your `_config.yml` exactly. A document whose `lang` is not one of the configured languages, whether a language the site does not build (`lang: de` on an `en`/`fr` site) or a mis-cased code (`lang: pt-br` when the site is configured with `pt-BR`), fails the build with an error naming the file, so a typo cannot silently turn a translation into default language content. The same check applies to `lang-exclusive` entries and, when `lang_from_path` is enabled, to the language segments of file paths.
+Language codes are case sensitive and must match the `languages` in your `_config.yml` exactly. A document whose `lang` is not one of the configured languages, whether a language the site does not build (`lang: de` on an `en`/`fr` site) or a mis-cased code (`lang: pt-br` when the site is configured with `pt-BR`), fails the build by default with an error naming the file, so a typo cannot silently turn a translation into default language content. The `unconfigured_lang` option chooses what happens to such documents instead:
+
+```yaml
+unconfigured_lang: error # error (default), ignore or generate
+```
+
+- `error` fails the build, naming the file and the language, and suggesting the configured code when only the case differs.
+- `ignore` leaves the document out of every language build and logs a warning. Handy for a development build with a reduced `languages` list while your content has translations for the full list.
+- `generate` builds the document regardless, as earlier versions of Polyglot did. The document keeps its own language, so it never replaces a configured translation or the default language fallback, but it is rendered wherever no configured document exists for that page.
+
+The same check applies to `lang-exclusive` entries and, when `lang_from_path` is enabled, to the language segments of file paths.
 
 You can see how the live Polyglot website [configures and supports multiple languages](https://github.com/untra/polyglot/blob/main/site/_config.yml#L28-L37), and examples of [community](https://github.com/untra/polyglot/pull/155) [language](https://github.com/untra/polyglot/pull/167) [contributions](https://github.com/untra/polyglot/pull/177).
 

@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :serial_default_lang, :lang_urls
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :serial_default_lang, :lang_urls, :unconfigured_lang
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -20,6 +20,13 @@ module Jekyll
       @serial_default_lang = config.fetch('serial_default_lang', false)
       @lang_from_path = config.fetch('lang_from_path', false)
       @fallback_canonical_to_default_lang = config.fetch('fallback_canonical_to_default_lang', false)
+      # what happens to a document whose language is not one of the configured
+      # languages, see unconfigured_lang_allowed?
+      @unconfigured_lang = config.fetch('unconfigured_lang', 'error').to_s
+      unless %w[error ignore generate].include?(@unconfigured_lang)
+        raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: unconfigured_lang must be one of error, ignore or generate, got '#{@unconfigured_lang}'"
+      end
+
       @exclude_from_localization = config.fetch('exclude_from_localization', []).map do |e|
         if File.directory?(e) && e[-1] != '/'
           "#{e}/"
@@ -94,12 +101,26 @@ module Jekyll
 
     # Language codes are case sensitive and must match the configured languages
     # exactly. A document declaring a language the site is not configured for
-    # is a typo, a mis-cased code or a stale language, so the build fails rather
-    # than silently serving the document as default language content.
-    def ensure_configured_lang!(doc, lang, attribute = 'lang')
-      return if all_languages.include?(lang)
+    # is a typo, a mis-cased code or a language the site does not build, and
+    # the unconfigured_lang option decides what happens to it:
+    #   error    - fail the build naming the file and the code (the default)
+    #   ignore   - warn and leave the document out of every language build
+    #   generate - build the document regardless, as older polyglot versions did
+    # Returns whether the document may be built with the given language.
+    def unconfigured_lang_allowed?(doc, lang, attribute = 'lang')
+      return true if all_languages.include?(lang)
 
-      raise Jekyll::Errors::FatalException, "Polyglot: #{doc.relative_path} has #{attribute} '#{lang}' which is not one of the configured languages #{all_languages.inspect}#{case_hint(lang)}"
+      problem = "#{attribute} '#{lang}' which is not one of the configured languages #{all_languages.inspect}#{case_hint(lang)}"
+      case @unconfigured_lang
+      when 'error'
+        raise Jekyll::Errors::FatalException, "Polyglot: #{doc.relative_path} has #{problem}"
+      when 'ignore'
+        Jekyll.logger.warn "Polyglot:", "Ignoring #{doc.relative_path}'s #{problem}"
+        false
+      else
+        Jekyll.logger.debug "Polyglot:", "Generating #{doc.relative_path} despite its #{problem}"
+        true
+      end
     end
 
     # names the configured language a mis-cased code was probably meant to be
@@ -227,12 +248,11 @@ module Jekyll
 
       # a segment of the project relative path that only differs from a
       # configured language by case is a mis-cased language code, not default
-      # language content, so fail the build rather than guess
-      split_on_multiple_delimiters(doc.relative_path.to_s).each do |segment|
-        ensure_configured_lang!(doc, segment, 'path segment') if all_languages.any? { |lang| lang.casecmp?(segment) }
+      # language content, so report it as the (unconfigured) language of the
+      # document and let unconfigured_lang decide what happens to it
+      split_on_multiple_delimiters(doc.relative_path.to_s).find do |segment|
+        all_languages.any? { |lang| lang.casecmp?(segment) }
       end
-
-      nil
     end
 
     # assigns natural permalinks to documents and prioritizes documents with
@@ -250,14 +270,15 @@ module Jekyll
 
       docs.each do |doc|
         lang = doc.data['lang'] || derive_lang_from_path(doc)
-        # a document in a language the site is not configured for, or with a
-        # mis-cased code, fails the build (see ensure_configured_lang!) instead
-        # of being skipped or served as default language content
-        ensure_configured_lang!(doc, lang) unless lang.nil?
+        # unconfigured_lang decides what happens to a document whose language
+        # (or mis-cased code) is not configured: fail the build, leave the
+        # document out, or build it regardless (see unconfigured_lang_allowed?)
+        next if lang && !unconfigured_lang_allowed?(doc, lang, doc.data['lang'] ? 'lang' : 'path segment')
+
         lang ||= @default_lang
 
         lang_exclusive = doc.data['lang-exclusive'] || []
-        lang_exclusive.each { |exclusive_lang| ensure_configured_lang!(doc, exclusive_lang, 'lang-exclusive') }
+        lang_exclusive.each { |exclusive_lang| unconfigured_lang_allowed?(doc, exclusive_lang, 'lang-exclusive') }
 
         url = doc.url.gsub(regex, '/')
         page_id = doc.data['page_id'] || url
@@ -334,8 +355,8 @@ module Jekyll
         end
         permalinkDocs.each do |dd|
           doclang = dd.data['lang'] || derive_lang_from_path(dd) || @default_lang
-          # only configured languages have a permalink, an unconfigured one
-          # fails the build in coordinate_documents
+          # only configured languages have a permalink, unconfigured ones are
+          # dealt with in coordinate_documents (see unconfigured_lang_allowed?)
           next unless all_languages.include?(doclang)
 
           doc.data['permalink_lang'][doclang] = dd.data['permalink']

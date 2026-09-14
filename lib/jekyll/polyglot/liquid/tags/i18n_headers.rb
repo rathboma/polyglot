@@ -38,7 +38,7 @@ module Jekyll
           end
 
           # Build a hash of lang => permalink for all matching docs in configured
-          # languages (language codes are case sensitive, see Site#ensure_configured_lang!)
+          # languages (language codes are case sensitive, see Site#unconfigured_lang_allowed?)
           # If lang is not set, assume it's the default language
           lang_to_permalink = docs_with_same_id
             .reject { |doc| doc.data['lang'] && !site.all_languages.include?(doc.data['lang']) }

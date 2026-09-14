@@ -253,10 +253,12 @@ describe Site do
       end
     end
 
-    it 'should fail the build on a path segment that only differs from a configured language by case' do
+    it 'should report a path segment that only differs from a configured language by case as that language' do
       collection = Jekyll::Collection.new(@site, 'pt-br')
       document = Jekyll::Document.new('missing/pt-BR/sobre.md', site: @site, collection: collection)
-      expect { @site.derive_lang_from_path document }.to raise_error(
+      expect(@site.derive_lang_from_path(document)).to eq('pt-BR')
+      # which is not a configured language, so by default the build fails
+      expect { @site.coordinate_documents([document]) }.to raise_error(
         Jekyll::Errors::FatalException,
         %r{missing/pt-BR/sobre\.md has path segment 'pt-BR' which is not one of the configured languages \["en", "es", "pt-br"\], did you mean 'pt-br'\? Language codes are case sensitive}
       )
@@ -360,92 +362,178 @@ describe Site do
     end
   end
 
-  describe 'strict language codes' do
-    before do
-      @strict_site = Site.new(
+  describe 'unconfigured languages' do
+    def strict_site(overrides = {})
+      site = Site.new(
         Jekyll.configuration(
-          'languages' => ['en', 'pt-BR', 'zh-CN'],
-          'default_lang' => 'en',
-          'source' => File.expand_path('fixtures', __dir__),
-          'url' => 'https://test.github.io'
+          {
+            'languages' => ['en', 'pt-BR', 'zh-CN'],
+            'default_lang' => 'en',
+            'source' => File.expand_path('fixtures', __dir__),
+            'url' => 'https://test.github.io'
+          }.merge(overrides)
         )
       )
-      @strict_site.prepare
-      @strict_collection = Jekyll::Collection.new(@strict_site, 'test')
+      site.prepare
+      site.file_langs = {}
+      site
     end
 
-    def strict_doc(path, data)
-      Jekyll::Document.new(path, site: @strict_site, collection: @strict_collection).tap do |doc|
+    def doc_for(site, path, data)
+      Jekyll::Document.new(path, site: site, collection: Jekyll::Collection.new(site, 'test')).tap do |doc|
         doc.data.merge!(data)
       end
     end
 
-    it 'fails the build when a document lang differs from a configured language only by case' do
-      doc = strict_doc('sobre.pt-br.md', 'lang' => 'pt-br', 'permalink' => '/sobre/')
-      expect { @strict_site.coordinate_documents([doc]) }.to raise_error(
-        Jekyll::Errors::FatalException,
-        /sobre\.pt-br\.md has lang 'pt-br' which is not one of the configured languages \["en", "pt-BR", "zh-CN"\], did you mean 'pt-BR'\? Language codes are case sensitive/
-      )
-      expect(doc.data['lang']).to eq('pt-br')
+    it 'fails the build by default' do
+      expect(strict_site.unconfigured_lang).to eq('error')
     end
 
-    it 'fails the build when a document lang is not a configured language' do
-      doc = strict_doc('ueber.md', 'lang' => 'de', 'permalink' => '/ueber/')
-      expect { @strict_site.coordinate_documents([doc]) }.to raise_error(Jekyll::Errors::FatalException) { |error|
-        expect(error.message).to include("ueber.md has lang 'de' which is not one of the configured languages [\"en\", \"pt-BR\", \"zh-CN\"]")
-        expect(error.message).not_to include('did you mean')
-      }
+    it 'refuses an unconfigured_lang value it does not know' do
+      expect { strict_site('unconfigured_lang' => 'warn') }.to raise_error(Jekyll::Errors::InvalidConfigurationError, /unconfigured_lang must be one of error, ignore or generate, got 'warn'/)
     end
 
-    it 'fails the build on a lang-exclusive entry that is not a configured language' do
-      doc = strict_doc('samba.md', 'lang' => 'pt-BR', 'lang-exclusive' => ['pt-BR', 'pt-br'], 'permalink' => '/samba/')
-      expect { @strict_site.coordinate_documents([doc]) }.to raise_error(
-        Jekyll::Errors::FatalException,
-        /samba\.md has lang-exclusive 'pt-br' which is not one of the configured languages .*did you mean 'pt-BR'/
-      )
+    describe 'with unconfigured_lang: error' do
+      before do
+        @strict_site = strict_site
+      end
+
+      it 'fails the build when a document lang differs from a configured language only by case' do
+        doc = doc_for(@strict_site, 'sobre.pt-br.md', 'lang' => 'pt-br', 'permalink' => '/sobre/')
+        expect { @strict_site.coordinate_documents([doc]) }.to raise_error(
+          Jekyll::Errors::FatalException,
+          /sobre\.pt-br\.md has lang 'pt-br' which is not one of the configured languages \["en", "pt-BR", "zh-CN"\], did you mean 'pt-BR'\? Language codes are case sensitive/
+        )
+        expect(doc.data['lang']).to eq('pt-br')
+      end
+
+      it 'fails the build when a document lang is not a configured language' do
+        doc = doc_for(@strict_site, 'ueber.md', 'lang' => 'de', 'permalink' => '/ueber/')
+        expect { @strict_site.coordinate_documents([doc]) }.to raise_error(Jekyll::Errors::FatalException) { |error|
+          expect(error.message).to include("ueber.md has lang 'de' which is not one of the configured languages [\"en\", \"pt-BR\", \"zh-CN\"]")
+          expect(error.message).not_to include('did you mean')
+        }
+      end
+
+      it 'fails the build on a lang-exclusive entry that is not a configured language' do
+        doc = doc_for(@strict_site, 'samba.md', 'lang' => 'pt-BR', 'lang-exclusive' => ['pt-BR', 'pt-br'], 'permalink' => '/samba/')
+        expect { @strict_site.coordinate_documents([doc]) }.to raise_error(
+          Jekyll::Errors::FatalException,
+          /samba\.md has lang-exclusive 'pt-br' which is not one of the configured languages .*did you mean 'pt-BR'/
+        )
+      end
+
+      it 'accepts documents whose lang matches a configured language exactly' do
+        docs = [
+          doc_for(@strict_site, 'about.md', 'lang' => 'en', 'permalink' => '/about/', 'page_id' => 'about'),
+          doc_for(@strict_site, 'sobre.md', 'lang' => 'pt-BR', 'permalink' => '/sobre/', 'page_id' => 'about', 'lang-exclusive' => ['pt-BR', 'zh-CN'])
+        ]
+        @strict_site.active_lang = 'pt-BR'
+        coordinated = @strict_site.coordinate_documents(docs)
+        expect(coordinated.map { |d| d.data['lang'] }).to eq(['pt-BR'])
+        expect(coordinated[0].data['rendered_lang']).to eq('pt-BR')
+        expect(coordinated[0].data['permalink_lang']).to eq('en' => '/about/', 'pt-BR' => '/sobre/')
+      end
+
+      it 'treats documents without a lang as the default language' do
+        doc = doc_for(@strict_site, 'plain.md', 'permalink' => '/plain/')
+        expect { @strict_site.coordinate_documents([doc]) }.not_to raise_error
+        expect(doc.data['rendered_lang']).to eq('en')
+      end
     end
 
-    it 'accepts documents whose lang matches a configured language exactly' do
-      docs = [
-        strict_doc('about.md', 'lang' => 'en', 'permalink' => '/about/', 'page_id' => 'about'),
-        strict_doc('sobre.md', 'lang' => 'pt-BR', 'permalink' => '/sobre/', 'page_id' => 'about', 'lang-exclusive' => ['pt-BR', 'zh-CN'])
-      ]
-      @strict_site.file_langs = {}
-      @strict_site.active_lang = 'pt-BR'
-      coordinated = @strict_site.coordinate_documents(docs)
-      expect(coordinated.map { |d| d.data['lang'] }).to eq(['pt-BR'])
-      expect(coordinated[0].data['rendered_lang']).to eq('pt-BR')
-      expect(coordinated[0].data['permalink_lang']).to eq('en' => '/about/', 'pt-BR' => '/sobre/')
+    describe 'with unconfigured_lang: ignore' do
+      before do
+        @ignore_site = strict_site('unconfigured_lang' => 'ignore')
+      end
+
+      it 'leaves a document with an unconfigured lang out of the build with a warning' do
+        allow(Jekyll.logger).to receive(:warn)
+        expect(Jekyll.logger).to receive(:warn).with('Polyglot:', /Ignoring sobre\.pt-br\.md's lang 'pt-br' which is not one of the configured languages .*did you mean 'pt-BR'/)
+        docs = [
+          doc_for(@ignore_site, 'about.md', 'lang' => 'en', 'permalink' => '/about/', 'page_id' => 'about'),
+          doc_for(@ignore_site, 'sobre.pt-br.md', 'lang' => 'pt-br', 'permalink' => '/sobre/', 'page_id' => 'about')
+        ]
+        @ignore_site.active_lang = 'pt-BR'
+        coordinated = @ignore_site.coordinate_documents(docs)
+        expect(coordinated.map { |d| d.data['permalink'] }).to eq(['/about/'])
+        expect(coordinated[0].data['permalink_lang']).to eq('en' => '/about/')
+      end
+
+      it 'leaves a document with an unconfigured lang out of the build even when it is the only one' do
+        allow(Jekyll.logger).to receive(:warn)
+        doc = doc_for(@ignore_site, 'ueber.md', 'lang' => 'de', 'permalink' => '/ueber/')
+        expect(@ignore_site.coordinate_documents([doc])).to eq([])
+        expect(doc.data['rendered_lang']).to be_nil
+      end
+
+      it 'warns about a lang-exclusive entry that is not a configured language and keeps the document' do
+        allow(Jekyll.logger).to receive(:warn)
+        expect(Jekyll.logger).to receive(:warn).with('Polyglot:', /Ignoring samba\.md's lang-exclusive 'de' which is not one of the configured languages/)
+        doc = doc_for(@ignore_site, 'samba.md', 'lang' => 'en', 'lang-exclusive' => ['en', 'de'], 'permalink' => '/samba/')
+        expect(@ignore_site.coordinate_documents([doc])).to eq([doc])
+      end
     end
 
-    it 'treats documents without a lang as the default language' do
-      doc = strict_doc('plain.md', 'permalink' => '/plain/')
-      expect { @strict_site.coordinate_documents([doc]) }.not_to raise_error
-      expect(doc.data['rendered_lang']).to eq('en')
+    describe 'with unconfigured_lang: generate' do
+      before do
+        @generate_site = strict_site('unconfigured_lang' => 'generate')
+      end
+
+      it 'builds a document with an unconfigured lang like any other, without a warning' do
+        expect(Jekyll.logger).not_to receive(:warn)
+        doc = doc_for(@generate_site, 'ueber.md', 'lang' => 'de', 'permalink' => '/ueber/')
+        expect(@generate_site.coordinate_documents([doc])).to eq([doc])
+        expect(doc.data['lang']).to eq('de')
+        expect(doc.data['rendered_lang']).to eq('de')
+      end
+
+      it 'never lets a document with an unconfigured lang replace a configured translation or fallback' do
+        docs = [
+          doc_for(@generate_site, 'sobre.pt-br.md', 'lang' => 'pt-br', 'permalink' => '/sobre-errado/', 'page_id' => 'about'),
+          doc_for(@generate_site, 'about.md', 'lang' => 'en', 'permalink' => '/about/', 'page_id' => 'about'),
+          doc_for(@generate_site, 'sobre.md', 'lang' => 'pt-BR', 'permalink' => '/sobre/', 'page_id' => 'about')
+        ]
+        @generate_site.active_lang = 'pt-BR'
+        expect(@generate_site.coordinate_documents(docs).map { |d| d.data['permalink'] }).to eq(['/sobre/'])
+
+        @generate_site.file_langs = {}
+        @generate_site.active_lang = 'zh-CN'
+        expect(@generate_site.coordinate_documents(docs).map { |d| d.data['permalink'] }).to eq(['/about/'])
+      end
     end
 
     describe 'with lang_from_path' do
       before do
-        @strict_site.config['lang_from_path'] = true
-        @strict_site.prepare
+        @path_site = strict_site('lang_from_path' => true)
       end
 
       it 'derives the language from a path segment that matches a configured language exactly' do
-        expect(@strict_site.derive_lang_from_path(strict_doc('_posts/pt-BR/2024-01-01-caminho.md', {}))).to eq('pt-BR')
-        expect(@strict_site.derive_lang_from_path(strict_doc('about.zh-CN.md', {}))).to eq('zh-CN')
+        expect(@path_site.derive_lang_from_path(doc_for(@path_site, '_posts/pt-BR/2024-01-01-caminho.md', {}))).to eq('pt-BR')
+        expect(@path_site.derive_lang_from_path(doc_for(@path_site, 'about.zh-CN.md', {}))).to eq('zh-CN')
       end
 
-      it 'fails the build on a path segment that differs from a configured language only by case' do
-        expect { @strict_site.derive_lang_from_path(strict_doc('_posts/pt-br/2024-01-01-caminho.md', {})) }.to raise_error(
+      it 'reports a path segment that differs from a configured language only by case as that language' do
+        expect(@path_site.derive_lang_from_path(doc_for(@path_site, '_posts/pt-br/2024-01-01-caminho.md', {}))).to eq('pt-br')
+        expect(@path_site.derive_lang_from_path(doc_for(@path_site, 'about.PT-BR.md', {}))).to eq('PT-BR')
+      end
+
+      it 'fails the build on such a path segment by default' do
+        expect { @path_site.coordinate_documents([doc_for(@path_site, '_posts/pt-br/2024-01-01-caminho.md', {})]) }.to raise_error(
           Jekyll::Errors::FatalException,
           /caminho\.md has path segment 'pt-br' which is not one of the configured languages .*did you mean 'pt-BR'/
         )
-        expect { @strict_site.coordinate_documents([strict_doc('about.PT-BR.md', {})]) }.to raise_error(Jekyll::Errors::FatalException, /path segment 'PT-BR'/)
+      end
+
+      it 'leaves such a document out of the build with unconfigured_lang: ignore' do
+        allow(Jekyll.logger).to receive(:warn)
+        ignore_site = strict_site('lang_from_path' => true, 'unconfigured_lang' => 'ignore')
+        expect(ignore_site.coordinate_documents([doc_for(ignore_site, '_posts/pt-br/2024-01-01-caminho.md', {})])).to eq([])
       end
 
       it 'ignores path segments that are not language codes at all' do
-        expect(@strict_site.derive_lang_from_path(strict_doc('taken/blues/newspaper.md', {}))).to be_nil
-        expect(@strict_site.derive_lang_from_path(strict_doc('apropos.fr.md', {}))).to be_nil
+        expect(@path_site.derive_lang_from_path(doc_for(@path_site, 'taken/blues/newspaper.md', {}))).to be_nil
+        expect(@path_site.derive_lang_from_path(doc_for(@path_site, 'apropos.fr.md', {}))).to be_nil
       end
     end
   end
@@ -1848,6 +1936,16 @@ describe Site do
 
       @site.active_lang = 'en'
       expect { @site.coordinate_documents(pages) }.to raise_error(Jekyll::Errors::FatalException, /index\.de\.html has lang 'de' which is not one of the configured languages \["en", "pt-BR"\]/)
+
+      # unconfigured_lang: ignore is the escape hatch for that dev build, the
+      # German page is left out and the English page wins the default build
+      allow(Jekyll.logger).to receive(:warn)
+      expect(Jekyll.logger).to receive(:warn).with('Polyglot:', /Ignoring index\.de\.html's lang 'de'/)
+      @site.config['unconfigured_lang'] = 'ignore'
+      @site.prepare
+      @site.active_lang = 'en'
+      coordinated = @site.coordinate_documents(pages)
+      expect(coordinated.map { |p| p.data['title'] }).to eq(['The SQL Editor You Love'])
     end
 
     describe 'assignPageLanguagePermalinks with unconfigured languages' do

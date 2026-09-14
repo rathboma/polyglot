@@ -273,12 +273,31 @@ describe 'lang_urls' do
       PAGE
     end
 
-    it 'fails the build instead of guessing which language was meant' do
+    it 'fails the build by default instead of guessing which language was meant' do
       expect { build_site }.to raise_error(
         Jekyll::Errors::FatalException,
         /errado\.md has lang 'pt-br' which is not one of the configured languages \["en", "es", "pt-BR"\], did you mean 'pt-BR'\? Language codes are case sensitive/
       )
       expect(Dir.exist?(File.join(@dest, 'pt-br'))).to be false
+    end
+
+    it 'leaves the document out of every language build with unconfigured_lang: ignore' do
+      build_site('unconfigured_lang' => 'ignore')
+      expect(File.exist?(File.join(@dest, 'pt-br/sobre/index.html'))).to be true
+      expect(Dir.glob(File.join(@dest, '**', 'errado', 'index.html'))).to eq([])
+    end
+
+    it 'builds the document under its own language with unconfigured_lang: generate' do
+      build_site('unconfigured_lang' => 'generate')
+      # no configured document exists for /errado/, so the pt-br document is
+      # rendered as the fallback of every language build
+      expect(File.exist?(File.join(@dest, 'errado/index.html'))).to be true
+      expect(File.exist?(File.join(@dest, 'es/errado/index.html'))).to be true
+      expect(File.exist?(File.join(@dest, 'pt-br/errado/index.html'))).to be true
+      expect(output_for('pt-br/errado/index.html')).to include('<html lang="pt-BR">')
+      expect(output_for('pt-br/errado/index.html')).to include('Declares pt-br on a site configured with pt-BR.')
+      # while the real pt-BR translation is untouched
+      expect(canonical_in('pt-br/sobre/index.html')).to eq('https://example.com/pt-br/sobre/')
     end
   end
 end
