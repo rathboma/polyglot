@@ -10,15 +10,13 @@ def hook_coordinate(site)
   # See: https://www.ruby-forum.com/topic/142809
   merger = proc { |_key, v1, v2| v1.is_a?(Hash) && v2.is_a?(Hash) ? v1.merge(v2, &merger) : v2 }
 
-  # Try both exact case and normalized lookup for data files
-  default_data_key = site.data.keys.find { |k| k.downcase == site.default_lang.downcase }
-  if default_data_key && site.data.include?(default_data_key)
-    site.data = site.data.merge(site.data[default_data_key], &merger)
+  # data directories are matched by their exact language code, like every
+  # other language code (see Site#unconfigured_lang_allowed?)
+  if site.data.include?(site.default_lang)
+    site.data = site.data.merge(site.data[site.default_lang], &merger)
   end
-
-  active_data_key = site.data.keys.find { |k| k.downcase == site.active_lang.downcase }
-  if active_data_key && site.data.include?(active_data_key)
-    site.data = site.data.merge(site.data[active_data_key], &merger)
+  if site.data.include?(site.active_lang)
+    site.data = site.data.merge(site.data[site.active_lang], &merger)
   end
 
   site.collections.each_value do |collection|

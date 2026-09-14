@@ -39,7 +39,32 @@ These configuration preferences indicate
 - whether to run language processing in parallel or serial. Set to `false` if building on Windows hosts, or if Polyglot collides with other Jekyll plugins. If a plugin breaks only when you turn this on, try [`serial_default_lang`](#parallel-safe-plugins-serial_default_lang) before giving up on parallel builds.
 - your jekyll website production url. Make sure this value is set; Polyglot requires this to relative site urls correctly, and to make functioning language switchers.
 
-The optional `lang_from_path: true` option enables getting the page language from a filepath segment seperated by `/` or `.`, e.g `de/first-one.md`, or `_posts/zh_HK/use-second-segment.md` , if the lang frontmatter isn't defined.
+The optional `lang_from_path: true` option enables getting the page language from a filepath segment seperated by `/` or `.`, e.g `de/first-one.md`, or `_posts/zh_HK/use-second-segment.md` , if the lang frontmatter isn't defined. Path segments must match a configured language code exactly. With `unconfigured_lang` set to `error` or `ignore`, a segment that only differs by case, such as `pt-br` on a site configured with `pt-BR`, counts as that unconfigured language; with the default `generate` it is not recognised and the document falls back to the default language, as in earlier releases.
+
+#### Custom language url paths (`lang_urls`)
+
+By default a language is served under its language code, so the `pt-BR` site is built into `/pt-BR/`. To serve a language under a different url path segment, for example an all-lowercase one, map the language code (exactly as it appears in `languages`) to the segment you want:
+
+```yaml
+languages: ["en", "pt-BR", "zh-CN"]
+default_lang: "en"
+lang_urls:
+  pt-BR: pt-br
+  zh-CN: zh-cn
+```
+
+With this configuration the `pt-BR` site is written to `_site/pt-br/`, and every url Polyglot writes uses `/pt-br/`: relativized links, canonical urls, `hreflang` hrefs, scoped `redirect_from` paths and localized Netlify `_redirects`. The language itself does not change: `site.active_lang` is still `pt-BR`, `hreflang="pt-BR"` keeps its case, documents still declare `lang: pt-BR` and paths like `_posts/pt-BR/` still identify the language. Languages without an entry keep using their language code, so `lang_urls` is only needed for the languages whose urls you want to change.
+
+The resolved mapping is available to templates as `site.lang_urls`, with an entry for every language. Use it wherever a template turns a language code into a url, such as a language switcher or a sitemap:
+
+```liquid
+{% for lang in site.languages %}
+  {% capture lang_href %}{{site.baseurl}}/{% if lang != site.default_lang %}{{ site.lang_urls[lang] }}/{% endif %}{% endcapture %}
+  <a {% static_href %}href="{{ lang_href }}"{% endstatic_href %}>{{ lang }}</a>
+{% endfor %}
+```
+
+Two languages cannot share a url segment: Polyglot refuses to build when `lang_urls` maps more than one language to the same path, since their sites would overwrite each other.
 
 #### Parallel-safe plugins (`serial_default_lang`)
 
@@ -74,6 +99,18 @@ lang: sv
 or whatever appropriate [I18n language code](https://developer.chrome.com/docs/extensions/reference/api/i18n#locales)
 the page should build for. And you're done. Ideally, when designing your site, you should
 organize files by their relative urls.
+
+Language codes are case sensitive and must match the `languages` in your `_config.yml` exactly. A document whose `lang` is not one of the configured languages, whether a language the site does not build (`lang: de` on an `en`/`fr` site) or a mis-cased code (`lang: pt-br` when the site is configured with `pt-BR`), is handled according to the `unconfigured_lang` option:
+
+```yaml
+unconfigured_lang: generate # generate (default), ignore or error
+```
+
+- `generate` (the default) builds the document regardless, as earlier versions of Polyglot did. The document keeps its own language, so it never replaces a configured translation or the default language fallback, but it is rendered wherever no configured document exists for that page.
+- `ignore` leaves the document out of every language build and logs a warning. Handy for a development build with a reduced `languages` list while your content has translations for the full list.
+- `error` fails the build with an error naming the file and the language, and suggesting the configured code when only the case differs, so a typo cannot silently turn a translation into default language content. Recommended for production builds.
+
+The same applies to `lang-exclusive` entries and, with `error` or `ignore`, to the language segments of file paths when `lang_from_path` is enabled.
 
 You can see how the live Polyglot website [configures and supports multiple languages](https://github.com/untra/polyglot/blob/main/site/_config.yml#L28-L37), and examples of [community](https://github.com/untra/polyglot/pull/155) [language](https://github.com/untra/polyglot/pull/167) [contributions](https://github.com/untra/polyglot/pull/177).
 
@@ -375,6 +412,7 @@ This plugin stands out from other I18n Jekyll plugins.
 - provides the liquid tag `{{ site.languages }}` to get an array of your I18n strings.
 - provides the liquid tag `{{ site.default_lang }}` to get the default_lang I18n string.
 - provides the liquid tag `{{ site.active_lang }}` to get the I18n language string the website was built for. Alternative names for `active_lang` can be configured via `config.lang_vars`.
+- provides the liquid tag `{{ site.lang_urls }}` to get the url path segment of every language, for language switchers and sitemaps that respect `lang_urls`.
 - provides the liquid tag `{{ page.rendered_lang }}` to get the language the page content is actually rendered in (useful for detecting fallback pages).
 - provides the liquid tag `{{ page.canonical_url }}` with the canonical url of the page in the language being built, for other plugins such as jekyll-seo-tag to pick up.
 - provides the liquid tag `{{ I18n_Headers }}` to append SEO bonuses to your website.

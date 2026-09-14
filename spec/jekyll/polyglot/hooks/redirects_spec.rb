@@ -221,4 +221,48 @@ describe 'hook_redirects' do
       expect(output).not_to include("https://es/")
     end
   end
+
+  describe 'lang_urls' do
+    before do
+      @langs = ['en', 'es', 'pt-BR']
+    end
+
+    it 'should localize redirects with the url segment of each language' do
+      write_redirects("/github https://github.com/org/repo 302\n/foo /bar 301\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      site = create_site('localize_redirects' => true, 'lang_urls' => { 'pt-BR' => 'pt-br' })
+      hook_redirects(site)
+
+      output = read_output_redirects
+      expect(output).to include("/pt-br/github https://github.com/org/repo 302")
+      expect(output).to include("/pt-br/foo /pt-br/bar 301")
+      expect(output).to include("/es/github https://github.com/org/repo 302")
+      expect(output).to include("/es/foo /es/bar 301")
+      expect(output).not_to include("/pt-BR/")
+    end
+
+    it 'should keep using the language code without a lang_urls entry' do
+      write_redirects("/github https://github.com/org/repo 302\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      site = create_site('localize_redirects' => true)
+      hook_redirects(site)
+
+      output = read_output_redirects
+      expect(output).to include("/pt-BR/github https://github.com/org/repo 302")
+      expect(output).not_to include("/pt-br/")
+    end
+
+    it 'should not localize paths already prefixed with a url segment or language code' do
+      write_redirects("/pt-br/old /pt-br/new 301\n/pt-BR/velho /pt-BR/novo 301\n/pt-br /sobre 301\n")
+      FileUtils.cp(File.join(tmpdir, '_redirects'), dest_dir)
+
+      site = create_site('localize_redirects' => true, 'lang_urls' => { 'pt-BR' => 'pt-br' })
+      hook_redirects(site)
+
+      output = read_output_redirects
+      expect(output.strip).to eq("/pt-br/old /pt-br/new 301\n/pt-BR/velho /pt-BR/novo 301\n/pt-br /sobre 301")
+    end
+  end
 end
