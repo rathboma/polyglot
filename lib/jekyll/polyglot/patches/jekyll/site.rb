@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :lang_norm_map, :languages_normalized, :serial_default_lang, :lang_urls
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -42,9 +42,60 @@ module Jekyll
       # Store normalized versions for fast lookup
       @languages_normalized = @languages.map(&:downcase)
 
-      @keep_files += (@languages - [@default_lang])
+      fetch_lang_urls
+      # the sublanguage sites are written into their url segments, which the
+      # default language build must not clean up
+      @keep_files += (@languages - [@default_lang]).map { |lang| lang_url(lang) }
       @active_lang = @default_lang
       @lang_vars = config.fetch('lang_vars', [])
+    end
+
+    # Reads the optional lang_urls config, a mapping of language code to the
+    # url path segment that language is served under:
+    #   lang_urls:
+    #     pt-BR: pt-br
+    # builds the pt-BR site into /pt-br/ and writes /pt-br/ into every url,
+    # while site.active_lang, hreflang tags and front matter keep using pt-BR.
+    # Languages without an entry are served under their own language code.
+    def fetch_lang_urls
+      @lang_urls = ([@default_lang] + @languages).uniq.to_h { |lang| [lang, lang] }
+      overrides = config.fetch('lang_urls', nil) || {}
+      raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: lang_urls must map language codes to url segments, got #{overrides.inspect}" unless overrides.is_a?(Hash)
+
+      overrides.each do |lang, url|
+        canonical = normalize_lang(lang.to_s)
+        segment = url.to_s.strip.gsub(%r{\A/+|/+\z}, '')
+        if canonical.nil?
+          Jekyll.logger.warn "Polyglot:", "Ignoring lang_urls entry for '#{lang}', not in configured languages #{@lang_urls.keys.inspect}"
+        elsif segment.empty?
+          Jekyll.logger.warn "Polyglot:", "Ignoring lang_urls entry for '#{lang}', its url segment is empty"
+        else
+          @lang_urls[canonical] = segment
+        end
+      end
+
+      # two sublanguage sites written into the same directory would overwrite
+      # each other, so refuse to build
+      duplicates = (@languages - [@default_lang]).map { |lang| @lang_urls[lang] }.tally.select { |_, count| count > 1 }.keys
+      raise Jekyll::Errors::InvalidConfigurationError, "Polyglot: lang_urls maps more than one language to #{duplicates.inspect}" unless duplicates.empty?
+    end
+
+    # The url path segment a language is served under: its lang_urls entry
+    # when configured, and the language code itself otherwise
+    def lang_url(lang)
+      @lang_urls.fetch(lang) { @lang_urls.fetch(normalize_lang(lang), lang) }
+    end
+
+    # Every segment a language may appear as in a url: the language codes
+    # and, where they differ, their lang_urls segments
+    def lang_url_segments
+      (@languages || []).flat_map { |lang| [lang, lang_url(lang)] }.uniq
+    end
+
+    # The prefixes a permalink may carry for a language: its url segment and,
+    # when that differs, the language code itself
+    def lang_url_prefixes(lang)
+      [lang_url(lang), lang].uniq.map { |segment| "/#{segment}/" }
     end
 
     # Normalizes a language code to its canonical form from config
@@ -113,6 +164,7 @@ module Jekyll
       payload['site']['default_lang'] = default_lang
       payload['site']['languages'] = languages
       payload['site']['active_lang'] = active_lang
+      payload['site']['lang_urls'] = lang_urls
       lang_vars.each do |v|
         payload['site'][v] = active_lang
       end
@@ -142,7 +194,7 @@ module Jekyll
       old_dest = @dest
       old_exclude = @exclude
       @file_langs = {}
-      @dest = "#{@dest}/#{@active_lang}"
+      @dest = "#{@dest}/#{lang_url(@active_lang)}"
       @exclude += @exclude_from_localization
       process_orig
       @dest = old_dest
@@ -261,18 +313,10 @@ module Jekyll
       # Determine document language
       doc_lang = doc.data['lang'] || derive_lang_from_path(doc) || @default_lang
 
-      # Scope user-defined redirects to document's language if non-default
+      # Scope user-defined redirects to document's language if non-default,
+      # under the language url segment, unless a path is already prefixed
       if doc_lang != @default_lang && !user_redirects.empty?
-        user_redirects = user_redirects.map do |redirect_path|
-          # Normalize path to start with /
-          redirect_path = "/#{redirect_path}" unless redirect_path.start_with?('/')
-          # Only prefix if not already prefixed with this language
-          if redirect_path.start_with?("/#{doc_lang}/")
-            redirect_path
-          else
-            "/#{doc_lang}#{redirect_path}"
-          end
-        end
+        user_redirects = user_redirects.map { |redirect_path| localize_permalink(redirect_path, doc_lang) }
       end
 
       # Compute page_id based redirects (cross-language)
@@ -348,13 +392,21 @@ module Jekyll
       end
     end
 
-    # prefixes a permalink with its language, the default language and already
-    # prefixed permalinks are left alone
+    # prefixes a permalink with the url segment of its language, the default
+    # language and already prefixed permalinks are left alone
     def localize_permalink(permalink, lang)
       permalink = "/#{permalink}" unless permalink.start_with?('/')
-      return permalink if lang == @default_lang || permalink.start_with?("/#{lang}/")
+      return permalink if lang == @default_lang || lang_url_prefixes(lang).any? { |prefix| permalink.start_with?(prefix) }
 
-      "/#{lang}#{permalink}"
+      "/#{lang_url(lang)}#{permalink}"
+    end
+
+    # strips the url prefix of a language off a permalink, so /pt-br/about/
+    # becomes /about/, permalinks without the prefix are left alone
+    def delocalize_permalink(permalink, lang)
+      permalink = "/#{permalink}" unless permalink.start_with?('/')
+      prefix = lang_url_prefixes(lang).find { |p| permalink.start_with?(p) }
+      prefix ? "/#{permalink.delete_prefix(prefix)}" : permalink
     end
 
     # publishes the canonical url of a document as page.canonical_url, so that
@@ -388,8 +440,8 @@ module Jekyll
     # made by jekyll when parsing documents without explicitly set permalinks
     def document_url_regex
       regex = ''
-      (@languages || []).each do |lang|
-        regex += "([/.]#{lang}[/.])|"
+      lang_url_segments.each do |segment|
+        regex += "([/.]#{Regexp.escape(segment)}[/.])|"
       end
       regex.chomp! '|'
       /#{regex}/
@@ -406,7 +458,7 @@ module Jekyll
           escaped_x = glob_to_regex(x)
           regex += "(?!#{escaped_x})"
         end
-        @languages.each do |x|
+        lang_url_segments.each do |x|
           escaped_x = Regexp.escape(x)
           regex += "(?!#{escaped_x}/)"
         end
@@ -429,7 +481,7 @@ module Jekyll
           escaped_x = glob_to_regex(x)
           regex += "(?!#{escaped_x})"
         end
-        @languages.each do |x|
+        lang_url_segments.each do |x|
           escaped_x = Regexp.escape(x)
           regex += "(?!#{escaped_x}/)"
         end
@@ -448,7 +500,7 @@ module Jekyll
       return if doc.output.nil?
 
       modified_output = doc.output.dup
-      modified_output.gsub!(regex, "href=\"#{@baseurl}/#{@active_lang}/\\1\"")
+      modified_output.gsub!(regex, "href=\"#{@baseurl}/#{lang_url(@active_lang)}/\\1\"")
       doc.output = modified_output
     end
 
@@ -456,7 +508,7 @@ module Jekyll
       return if doc.output.nil?
 
       modified_output = doc.output.dup
-      modified_output.gsub!(regex, "href=\"#{url}#{@baseurl}/#{@active_lang}/\\1\"")
+      modified_output.gsub!(regex, "href=\"#{url}#{@baseurl}/#{lang_url(@active_lang)}/\\1\"")
       doc.output = modified_output
     end
 

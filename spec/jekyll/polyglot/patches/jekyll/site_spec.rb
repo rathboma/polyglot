@@ -406,6 +406,277 @@ describe Site do
     end
   end
 
+  describe 'lang_urls' do
+    def site_with_lang_urls(lang_urls, overrides = {})
+      site = Site.new(
+        Jekyll.configuration(
+          {
+            'languages' => ['en', 'es', 'pt-BR'],
+            'default_lang' => 'en',
+            'lang_urls' => lang_urls,
+            'source' => File.expand_path('fixtures', __dir__),
+            'url' => 'https://test.github.io'
+          }.merge(overrides)
+        )
+      )
+      site.prepare
+      site
+    end
+
+    it 'serves every language under its own language code by default' do
+      site = site_with_lang_urls(nil)
+      expect(site.lang_urls).to eq('en' => 'en', 'es' => 'es', 'pt-BR' => 'pt-BR')
+      expect(site.lang_url('pt-BR')).to eq('pt-BR')
+      expect(site.lang_url_segments).to eq(['en', 'es', 'pt-BR'])
+    end
+
+    it 'serves a language under its configured url segment' do
+      site = site_with_lang_urls('pt-BR' => 'pt-br')
+      expect(site.lang_url('pt-BR')).to eq('pt-br')
+      expect(site.lang_url('es')).to eq('es')
+      expect(site.lang_urls).to eq('en' => 'en', 'es' => 'es', 'pt-BR' => 'pt-br')
+      expect(site.lang_url_segments).to eq(['en', 'es', 'pt-BR', 'pt-br'])
+    end
+
+    it 'leaves the language codes themselves alone' do
+      site = site_with_lang_urls('pt-BR' => 'pt-br')
+      expect(site.languages).to eq(['en', 'es', 'pt-BR'])
+      expect(site.normalize_lang('pt-br')).to eq('pt-BR')
+      expect(site.active_lang).to eq('en')
+    end
+
+    it 'looks up lang_urls entries case-insensitively' do
+      site = site_with_lang_urls('PT-br' => 'pt-br')
+      expect(site.lang_url('pt-BR')).to eq('pt-br')
+      expect(site.lang_url('pt-br')).to eq('pt-br')
+      expect(site.lang_url('PT-BR')).to eq('pt-br')
+    end
+
+    it 'strips surrounding slashes from url segments' do
+      site = site_with_lang_urls('pt-BR' => '/pt-br/')
+      expect(site.lang_url('pt-BR')).to eq('pt-br')
+    end
+
+    it 'ignores entries for unconfigured languages' do
+      allow(Jekyll.logger).to receive(:warn)
+      expect(Jekyll.logger).to receive(:warn).with('Polyglot:', /'de'.*not in configured languages/)
+      site = site_with_lang_urls('de' => 'german', 'pt-BR' => 'pt-br')
+      expect(site.lang_urls).to eq('en' => 'en', 'es' => 'es', 'pt-BR' => 'pt-br')
+    end
+
+    it 'ignores empty url segments' do
+      allow(Jekyll.logger).to receive(:warn)
+      expect(Jekyll.logger).to receive(:warn).with('Polyglot:', /'pt-BR'.*empty/)
+      site = site_with_lang_urls('pt-BR' => '/')
+      expect(site.lang_url('pt-BR')).to eq('pt-BR')
+    end
+
+    it 'refuses to serve two languages under the same url segment' do
+      expect { site_with_lang_urls('pt-BR' => 'es') }.to raise_error(Jekyll::Errors::InvalidConfigurationError, /"es"/)
+      expect { site_with_lang_urls('pt-BR' => 'pt', 'es' => 'pt') }.to raise_error(Jekyll::Errors::InvalidConfigurationError, /"pt"/)
+    end
+
+    it 'refuses a lang_urls value that is not a mapping' do
+      expect { site_with_lang_urls(['pt-br']) }.to raise_error(Jekyll::Errors::InvalidConfigurationError, /lang_urls must map/)
+    end
+
+    it 'keeps the url segment directories of the sublanguage sites' do
+      site = site_with_lang_urls('pt-BR' => 'pt-br')
+      expect(site.keep_files).to include('es', 'pt-br')
+      expect(site.keep_files).not_to include('pt-BR')
+    end
+
+    it 'exposes the resolved mapping to templates as site.lang_urls' do
+      site = site_with_lang_urls('pt-BR' => 'pt-br')
+      expect(site.site_payload['site']['lang_urls']).to eq('en' => 'en', 'es' => 'es', 'pt-BR' => 'pt-br')
+      template = "{% for lang in site.languages %}{{ lang }}={{ site.lang_urls[lang] }} {% endfor %}"
+      output = site.liquid_renderer.file("").parse(template).render!(site.site_payload, registers: { site: site })
+      expect(output).to eq('en=en es=es pt-BR=pt-br ')
+    end
+
+    it 'builds the sublanguage site into its url segment while keeping its language code active' do
+      site = site_with_lang_urls('pt-BR' => 'pt-br')
+      dests = []
+      active_langs = []
+      allow(site).to receive(:process_orig) {
+        dests << site.dest
+        active_langs << site.active_lang
+      }
+      site.process_language 'pt-BR'
+      site.process_language 'es'
+      expect(dests).to eq(["#{site.config['destination']}/pt-br", "#{site.config['destination']}/es"])
+      expect(active_langs).to eq(['pt-BR', 'es'])
+      expect(site.config['active_lang']).to eq('es')
+    end
+
+    describe 'url rewriting' do
+      before do
+        @ptbr_site = site_with_lang_urls('pt-BR' => 'pt-br')
+        @ptbr_site.active_lang = 'pt-BR'
+        @collection = Jekyll::Collection.new(@ptbr_site, 'test')
+      end
+
+      it 'relativizes links into the url segment of the active language' do
+        doc = Jekyll::Document.new('about.md', site: @ptbr_site, collection: @collection)
+        doc.output = '<a href="/about/">about</a> <a href="https://test.github.io/about/">abs</a> <a href="/pt-br/sobre/">done</a>'
+        @ptbr_site.process_documents([doc])
+        expect(doc.output).to eq('<a href="/pt-br/about/">about</a> <a href="https://test.github.io/pt-br/about/">abs</a> <a href="/pt-br/sobre/">done</a>')
+      end
+
+      it 'does not relativize links already localized by url segment or language code' do
+        regex = @ptbr_site.relative_url_regex
+        expect(regex).not_to match 'href="/pt-br/about/"'
+        expect(regex).not_to match 'href="/pt-BR/about/"'
+        expect(regex).to match 'href="/about/"'
+        abs_regex = @ptbr_site.absolute_url_regex('https://test.github.io')
+        expect(abs_regex).not_to match 'href="https://test.github.io/pt-br/about/"'
+        expect(abs_regex).not_to match 'href="https://test.github.io/pt-BR/about/"'
+        expect(abs_regex).to match 'href="https://test.github.io/about/"'
+      end
+
+      it 'strips the url segment as well as the language code from document urls' do
+        regex = @ptbr_site.document_url_regex
+        expect('/pt-br/about/'.gsub(regex, '/')).to eq('/about/')
+        expect('/pt-BR/about/'.gsub(regex, '/')).to eq('/about/')
+        expect('/about.pt-BR/'.gsub(regex, '/')).to eq('/about/')
+        expect('/es/about/'.gsub(regex, '/')).to eq('/about/')
+        expect('/pt-brazil/about/'.gsub(regex, '/')).to eq('/pt-brazil/about/')
+      end
+
+      it 'localizes permalinks with the url segment' do
+        expect(@ptbr_site.localize_permalink('/about/', 'pt-BR')).to eq('/pt-br/about/')
+        expect(@ptbr_site.localize_permalink('about/', 'pt-BR')).to eq('/pt-br/about/')
+        expect(@ptbr_site.localize_permalink('/pt-br/about/', 'pt-BR')).to eq('/pt-br/about/')
+        expect(@ptbr_site.localize_permalink('/pt-BR/about/', 'pt-BR')).to eq('/pt-BR/about/')
+        expect(@ptbr_site.localize_permalink('/about/', 'es')).to eq('/es/about/')
+        expect(@ptbr_site.localize_permalink('/about/', 'en')).to eq('/about/')
+      end
+
+      it 'delocalizes permalinks carrying the url segment or the language code' do
+        expect(@ptbr_site.delocalize_permalink('/pt-br/about/', 'pt-BR')).to eq('/about/')
+        expect(@ptbr_site.delocalize_permalink('/pt-BR/about/', 'pt-BR')).to eq('/about/')
+        expect(@ptbr_site.delocalize_permalink('/about/', 'pt-BR')).to eq('/about/')
+        expect(@ptbr_site.delocalize_permalink('pt-br/about/', 'pt-BR')).to eq('/about/')
+        expect(@ptbr_site.delocalize_permalink('/pt-br/', 'pt-BR')).to eq('/')
+        expect(@ptbr_site.delocalize_permalink('/es/about/', 'es')).to eq('/about/')
+      end
+
+      it 'scopes redirect_from paths to the url segment of the document language' do
+        doc = Jekyll::Document.new('sobre.md', site: @ptbr_site, collection: @collection).tap do |d|
+          d.data['lang'] = 'pt-BR'
+          d.data['permalink'] = '/sobre/'
+          d.data['redirect_from'] = ['/antigo/', 'velho/', '/pt-br/anterior/', '/pt-BR/antiga/']
+        end
+        @ptbr_site.assignPageRedirects(doc, [doc])
+        expect(doc.data['redirect_from']).to eq(['/pt-br/antigo/', '/pt-br/velho/', '/pt-br/anterior/', '/pt-BR/antiga/'])
+      end
+
+      it 'canonicalizes documents to the url segment of the active language' do
+        en_doc = Jekyll::Document.new('about.md', site: @ptbr_site, collection: @collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['page_id'] = 'about'
+          d.data['permalink'] = '/about/'
+        end
+        doc = Jekyll::Document.new('sobre.md', site: @ptbr_site, collection: @collection).tap do |d|
+          d.data['lang'] = 'pt-BR'
+          d.data['page_id'] = 'about'
+          d.data['permalink'] = '/sobre/'
+        end
+        @ptbr_site.file_langs = {}
+        coordinated = @ptbr_site.coordinate_documents([en_doc, doc])
+        expect(coordinated).to eq([doc])
+        expect(doc.data['canonical_url']).to eq('https://test.github.io/pt-br/sobre/')
+        expect(doc.data['permalink_lang']).to eq('en' => '/about/', 'pt-BR' => '/sobre/')
+      end
+
+      it 'canonicalizes fallback documents to the url segment of the active language' do
+        en_doc = Jekyll::Document.new('about.md', site: @ptbr_site, collection: @collection).tap do |d|
+          d.data['lang'] = 'en'
+          d.data['permalink'] = '/about/'
+        end
+        @ptbr_site.file_langs = {}
+        @ptbr_site.coordinate_documents([en_doc])
+        expect(en_doc.data['canonical_url']).to eq('https://test.github.io/pt-br/about/')
+      end
+
+      it 'writes i18n_headers hrefs with the url segment while keeping the hreflang language code' do
+        docs = [
+          Jekyll::Document.new('about.md', site: @ptbr_site, collection: @collection).tap do |d|
+            d.data['lang'] = 'en'
+            d.data['page_id'] = 'about'
+            d.data['permalink'] = '/about/'
+          end,
+          Jekyll::Document.new('sobre.md', site: @ptbr_site, collection: @collection).tap do |d|
+            d.data['lang'] = 'pt-BR'
+            d.data['page_id'] = 'about'
+            d.data['permalink'] = '/sobre/'
+          end
+        ]
+        @ptbr_site.collections['test'] = @collection
+        @collection.docs.concat(docs)
+
+        page = docs[1].data.merge('permalink' => '/sobre/', 'page_id' => 'about')
+        context = Liquid::Context.new({}, {}, { site: @ptbr_site, page: page })
+        output = Liquid::Template.parse("{% i18n_headers %}").render(context)
+
+        expect(output).to include('<link rel="canonical" href="https://test.github.io/pt-br/sobre/"/>')
+        expect(output).to include('<link rel="alternate" hreflang="pt-BR" href="https://test.github.io/pt-br/sobre/"/>')
+        expect(output).to include('<link rel="alternate" hreflang="en" href="https://test.github.io/about/"/>')
+        expect(output).to include('<link rel="alternate" hreflang="x-default" href="https://test.github.io/about/"/>')
+        expect(output).not_to include('/pt-BR/')
+        expect(output).not_to include('hreflang="pt-br"')
+      end
+
+      it 'does not double the url segment of i18n_headers permalinks that already carry it' do
+        docs = [
+          Jekyll::Document.new('accessibility.md', site: @ptbr_site, collection: @collection).tap do |d|
+            d.data['lang'] = 'en'
+            d.data['page_id'] = 'accessibility'
+            d.data['permalink'] = '/accessibility/'
+          end,
+          Jekyll::Document.new('acessibilidade.md', site: @ptbr_site, collection: @collection).tap do |d|
+            d.data['lang'] = 'pt-BR'
+            d.data['page_id'] = 'accessibility'
+            d.data['permalink'] = '/pt-br/acessibilidade/'
+          end
+        ]
+        @ptbr_site.collections['test'] = @collection
+        @collection.docs.concat(docs)
+
+        page = docs[1].data.merge('permalink' => '/pt-br/acessibilidade/', 'page_id' => 'accessibility')
+        context = Liquid::Context.new({}, {}, { site: @ptbr_site, page: page })
+        output = Liquid::Template.parse("{% i18n_headers %}").render(context)
+
+        expect(output).to include('<link rel="canonical" href="https://test.github.io/pt-br/acessibilidade/"/>')
+        expect(output).to include('<link rel="alternate" hreflang="pt-BR" href="https://test.github.io/pt-br/acessibilidade/"/>')
+        expect(output).not_to include('/pt-br/pt-br/')
+      end
+
+      it 'matches i18n_headers translations by permalink when the page permalink carries the url segment' do
+        docs = [
+          Jekyll::Document.new('about.md', site: @ptbr_site, collection: @collection).tap do |d|
+            d.data['lang'] = 'en'
+            d.data['permalink'] = '/about/'
+          end,
+          Jekyll::Document.new('about.pt-BR.md', site: @ptbr_site, collection: @collection).tap do |d|
+            d.data['lang'] = 'pt-BR'
+            d.data['permalink'] = '/about/'
+          end
+        ]
+        @ptbr_site.collections['test'] = @collection
+        @collection.docs.concat(docs)
+
+        page = docs[1].data.merge('permalink' => '/pt-br/about/')
+        context = Liquid::Context.new({}, {}, { site: @ptbr_site, page: page })
+        output = Liquid::Template.parse("{% i18n_headers %}").render(context)
+
+        expect(output).to include('<link rel="canonical" href="https://test.github.io/pt-br/about/"/>')
+        expect(output).to include('<link rel="alternate" hreflang="pt-BR" href="https://test.github.io/pt-br/about/"/>')
+        expect(output).to include('<link rel="alternate" hreflang="en" href="https://test.github.io/about/"/>')
+      end
+    end
+  end
+
   describe @site do
     it 'should spawn no more than Etc.nprocessors processes' do
       forks = 0

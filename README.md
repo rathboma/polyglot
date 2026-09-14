@@ -41,6 +41,31 @@ These configuration preferences indicate
 
 The optional `lang_from_path: true` option enables getting the page language from a filepath segment seperated by `/` or `.`, e.g `de/first-one.md`, or `_posts/zh_HK/use-second-segment.md` , if the lang frontmatter isn't defined.
 
+#### Custom language url paths (`lang_urls`)
+
+By default a language is served under its language code, so the `pt-BR` site is built into `/pt-BR/`. To serve a language under a different url path segment, for example an all-lowercase one, map the language code to the segment you want:
+
+```yaml
+languages: ["en", "pt-BR", "zh-CN"]
+default_lang: "en"
+lang_urls:
+  pt-BR: pt-br
+  zh-CN: zh-cn
+```
+
+With this configuration the `pt-BR` site is written to `_site/pt-br/`, and every url Polyglot writes uses `/pt-br/`: relativized links, canonical urls, `hreflang` hrefs, scoped `redirect_from` paths and localized Netlify `_redirects`. The language itself does not change: `site.active_lang` is still `pt-BR`, `hreflang="pt-BR"` keeps its case, documents still declare `lang: pt-BR` and paths like `_posts/pt-BR/` still identify the language. Languages without an entry keep using their language code, so `lang_urls` is only needed for the languages whose urls you want to change.
+
+The resolved mapping is available to templates as `site.lang_urls`, with an entry for every language. Use it wherever a template turns a language code into a url, such as a language switcher or a sitemap:
+
+```liquid
+{% for lang in site.languages %}
+  {% capture lang_href %}{{site.baseurl}}/{% if lang != site.default_lang %}{{ site.lang_urls[lang] }}/{% endif %}{% endcapture %}
+  <a {% static_href %}href="{{ lang_href }}"{% endstatic_href %}>{{ lang }}</a>
+{% endfor %}
+```
+
+Two languages cannot share a url segment: Polyglot refuses to build when `lang_urls` maps more than one language to the same path, since their sites would overwrite each other.
+
 #### Parallel-safe plugins (`serial_default_lang`)
 
 ```yaml
@@ -375,6 +400,7 @@ This plugin stands out from other I18n Jekyll plugins.
 - provides the liquid tag `{{ site.languages }}` to get an array of your I18n strings.
 - provides the liquid tag `{{ site.default_lang }}` to get the default_lang I18n string.
 - provides the liquid tag `{{ site.active_lang }}` to get the I18n language string the website was built for. Alternative names for `active_lang` can be configured via `config.lang_vars`.
+- provides the liquid tag `{{ site.lang_urls }}` to get the url path segment of every language, for language switchers and sitemaps that respect `lang_urls`.
 - provides the liquid tag `{{ page.rendered_lang }}` to get the language the page content is actually rendered in (useful for detecting fallback pages).
 - provides the liquid tag `{{ page.canonical_url }}` with the canonical url of the page in the language being built, for other plugins such as jekyll-seo-tag to pick up.
 - provides the liquid tag `{{ I18n_Headers }}` to append SEO bonuses to your website.

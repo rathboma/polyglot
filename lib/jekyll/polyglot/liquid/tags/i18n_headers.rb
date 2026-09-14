@@ -13,10 +13,9 @@ module Jekyll
           site = context.registers[:site]
           page = context.registers[:page]
           permalink = page['permalink'] || page['url'] || ''
-          permalink = "/#{permalink}" unless permalink.start_with?("/")
-          # Strip language prefix from permalink for matching (e.g., /es/about -> /about)
-          normalized_permalink = permalink.delete_prefix("/#{site.active_lang}/")
-          normalized_permalink = "/#{normalized_permalink}" unless normalized_permalink.start_with?("/")
+          # Strip the language prefix from the permalink for matching (e.g. /es/about -> /about),
+          # whether it carries the language code or its lang_urls segment
+          normalized_permalink = site.delocalize_permalink(permalink, site.active_lang)
           page_id = page['page_id']
           permalink_lang = page['permalink_lang']
           baseurl = site.config['baseurl'] || ''
@@ -70,11 +69,10 @@ module Jekyll
             default_permalink = lang_to_permalink[site.default_lang] || (permalink_lang && permalink_lang[site.default_lang]) || normalized_permalink
             default_permalink = "/#{default_permalink}" unless default_permalink.start_with?("/")
             default_permalink
-          elsif current_lang == site.default_lang
-            current_permalink
           else
-            # Don't add language prefix if it's already in the permalink
-            current_permalink.start_with?("/#{current_lang}/") ? current_permalink : "/#{current_lang}#{current_permalink}"
+            # The default language is served at the root, every other language
+            # under its url segment (unless the permalink already carries it)
+            site.localize_permalink(current_permalink, current_lang)
           end
           # Site#assignCanonicalUrl works out the same url from the full set of
           # translations, including the ones this build dropped, so prefer it
@@ -103,9 +101,9 @@ module Jekyll
               "<link rel=\"alternate\" hreflang=\"#{lang}\" href=\"#{site_url}#{alt_permalink}\"/>\n" \
                 "<link rel=\"alternate\" hreflang=\"x-default\" href=\"#{site_url}#{default_lang_permalink}\"/>\n"
             else
-              # For non-default languages, use the language-specific permalink directly
-              # Don't add the language prefix if it's already in the permalink
-              lang_permalink = alt_permalink.start_with?("/#{lang}/") ? alt_permalink : "/#{lang}#{alt_permalink}"
+              # For non-default languages, serve the language-specific permalink under
+              # the language url segment (unless the permalink already carries it)
+              lang_permalink = site.localize_permalink(alt_permalink, lang)
               "<link rel=\"alternate\" hreflang=\"#{lang}\" href=\"#{site_url}#{lang_permalink}\"/>\n"
             end
           end
