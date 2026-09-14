@@ -4,7 +4,7 @@ require 'etc'
 include Process
 module Jekyll
   class Site
-    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :serial_default_lang, :lang_urls, :unconfigured_lang
+    attr_reader :default_lang, :languages, :exclude_from_localization, :lang_vars, :lang_from_path, :fallback_canonical_to_default_lang, :serial_default_lang, :lang_urls, :unconfigured_lang, :full_default_lang_fallback
     attr_accessor :file_langs, :active_lang
 
     def prepare
@@ -20,6 +20,11 @@ module Jekyll
       @serial_default_lang = config.fetch('serial_default_lang', false)
       @lang_from_path = config.fetch('lang_from_path', false)
       @fallback_canonical_to_default_lang = config.fetch('fallback_canonical_to_default_lang', false)
+      # When true, a page that has no translation for the language being built
+      # is rendered as a complete copy of the page in the language its content
+      # is actually written in, instead of default language content wrapped in
+      # site chrome from the language being built. See README for details.
+      @full_default_lang_fallback = config.fetch('full_default_lang_fallback', false)
       # what happens to a document whose language is not one of the configured
       # languages, see unconfigured_lang_allowed?
       @unconfigured_lang = config.fetch('unconfigured_lang', 'generate').to_s
@@ -183,6 +188,9 @@ module Jekyll
       payload['site']['default_lang'] = default_lang
       payload['site']['languages'] = languages
       payload['site']['active_lang'] = active_lang
+      # build_lang always reports the language the site is being built for, even
+      # on a fallback page where active_lang follows the page's rendered_lang.
+      payload['site']['build_lang'] = active_lang
       payload['site']['lang_urls'] = lang_urls
       lang_vars.each do |v|
         payload['site'][v] = active_lang
@@ -193,6 +201,7 @@ module Jekyll
     def process_language(lang)
       @active_lang = lang
       config['active_lang'] = @active_lang
+      config['build_lang'] = @active_lang
       lang_vars.each do |v|
         config[v] = @active_lang
       end

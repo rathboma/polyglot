@@ -183,6 +183,43 @@ Lets say you are building your website. You have an `/about/` page written in *e
 
 No worries. Polyglot ensures the sitemap of your *english* site matches your *french* site, matches your *swedish* and *german* sites too. In this case, because you specified a `default_lang` variable in your `_config.yml`, all sites missing their languages' counterparts will fallback to your `default_lang`, so content is preserved across different languages of your site.
 
+#### Full fallback pages (`full_default_lang_fallback`)
+
+```yaml
+full_default_lang_fallback: true
+```
+
+Default: `false`.
+
+By default a fallback page is a mix of two languages. `/fr/about/` serves the *english* `/about/` document, so its body is english, but everything that keys off `site.active_lang` — your `lang_vars` and your [localized `site.data`](#localized-sitedata) — still renders in *french*. The navigation, the buttons and the translated strings come out french while the content they wrap is english, and a template that labels the page with `{{ page.rendered_lang }}` ends up declaring `lang="en"` on a page whose chrome is french.
+
+With `full_default_lang_fallback: true`, those variables follow `page.rendered_lang` instead of `site.active_lang` while a fallback page renders, so the page is a complete copy of the page in the language its content is actually written in:
+
+| on `/fr/about/` (no french translation) | default | `full_default_lang_fallback: true` |
+| --- | --- | --- |
+| page body | english | english |
+| `page.rendered_lang` | `en` | `en` |
+| `site.active_lang` | `fr` | `en` |
+| `lang_vars` (e.g. `site.lang`) | `fr` | `en` |
+| `site.data.strings.hello` | french | english |
+| `site.data[site.active_lang]` | french | english |
+| `site.build_lang` | `fr` | `fr` |
+
+Pages that *do* have a translation are untouched, and so is every page on the `default_lang` site. The rule is applied in both directions: a page written only in *french* served on the *english* site renders as a full french copy.
+
+This only changes the language a page is rendered in. It does not change where a page is published, how links are relativized, or the `canonical` and `hreflang` urls that [`{% I18n_Headers %}`](#canonical-url-handling) writes — a fallback page still lives under `/fr/`, and its links still keep visitors on the *french* site. Pair it with [`fallback_canonical_to_default_lang`](#canonical-url-handling) if you also want fallback pages to consolidate their SEO authority onto the `default_lang` url.
+
+Use `site.build_lang` wherever you need the language the site is being built for regardless of the page you are on — a language switcher, for example, which still has to highlight *french* on a fallback page. `site.build_lang` is always available, whether or not this option is enabled.
+
+```liquid
+<html lang="{{ site.active_lang }}">
+<nav>
+  {% for lang in site.languages %}
+    <a href="{{ page.permalink_lang[lang] }}" {% if lang == site.build_lang %}class="current"{% endif %}>{{ lang }}</a>
+  {% endfor %}
+</nav>
+```
+
 #### Smart hreflang Generation
 
 Polyglot only generates `hreflang` tags for languages that have actual translations. This improves SEO correctness by not advertising language alternatives that don't actually exist.
@@ -414,6 +451,7 @@ This plugin stands out from other I18n Jekyll plugins.
 - provides the liquid tag `{{ site.active_lang }}` to get the I18n language string the website was built for. Alternative names for `active_lang` can be configured via `config.lang_vars`.
 - provides the liquid tag `{{ site.lang_urls }}` to get the url path segment of every language, for language switchers and sitemaps that respect `lang_urls`.
 - provides the liquid tag `{{ page.rendered_lang }}` to get the language the page content is actually rendered in (useful for detecting fallback pages).
+- provides the liquid tag `{{ site.build_lang }}` to get the language the site is being built for, even on a fallback page rendered in another language.
 - provides the liquid tag `{{ page.canonical_url }}` with the canonical url of the page in the language being built, for other plugins such as jekyll-seo-tag to pick up.
 - provides the liquid tag `{{ I18n_Headers }}` to append SEO bonuses to your website.
 - provides the liquid tag `{{ Unrelativized_Link href="/hello" }}` to make urls that do not get influenced by url correction regexes.
@@ -455,6 +493,8 @@ This is useful for:
 - Tracking translation coverage
 - Applying different styling to fallback pages
 - Building translation status dashboards
+
+If instead of flagging fallback pages you would rather they were complete copies of the page in the language they are written in, see [`full_default_lang_fallback`](#full-fallback-pages-full_default_lang_fallback).
 
 ## SEO Recipes
 Jekyll-polyglot has a few spectacular [Search Engine Optimization techniques](https://untra.github.io/polyglot/seo) to ensure your Jekyll blog gets the most out of its multilingual audience. Check them out!
